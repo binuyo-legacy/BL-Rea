@@ -122,6 +122,8 @@
         "scripts/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
         "src/**/*.ts",
         "tests/**/*.ts",
+        "experiments/mcap-inspection/*.ts",
+        "experiments/mcap-inspection/{package.json,package-lock.json,tsconfig.json}",
         ".github/actions/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
         ".github/**/package.json",
         ".github/workflows/*.{yml,yaml}",
