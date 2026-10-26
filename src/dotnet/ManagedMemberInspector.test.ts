@@ -731,6 +731,21 @@ describe("managed edge target declaring types", () => {
     ]);
   });
 
+  it("keeps missing site offsets in older Evidence as unknown without inventing a location", () => {
+    const current = inspect({});
+    const parsed = managedMemberInspectionSchema.parse({
+      ...current,
+      call_edges: current.call_edges.map(
+        ({ il_offset: _omitted, ...legacy }) => legacy,
+      ),
+      field_accesses: current.field_accesses.map(
+        ({ il_offset: _omitted, ...legacy }) => legacy,
+      ),
+    });
+    expect(parsed.call_edges[0]).toHaveProperty("il_offset", null);
+    expect(parsed.field_accesses[0]).toHaveProperty("il_offset", null);
+  });
+
   it("reads Evidence recorded before declaring types were named as unknown", () => {
     const current = inspect({});
     const parsed = managedMemberInspectionSchema.parse({

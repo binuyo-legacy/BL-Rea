@@ -151,6 +151,10 @@ it("runs every managed static inspection independently of an active native targe
       operation: "inspect_managed_members",
       provider: { id: "rea-dotnet-static" },
       subject: { local_path: path, format: "pe" },
+      normalized_result: {
+        call_edges: [{ caller_token: "0x06000001", il_offset: 6 }],
+        field_accesses: [{ method_token: "0x06000001", il_offset: 1 }],
+      },
     });
     const otherArtifact = structured(
       await client.callTool({
