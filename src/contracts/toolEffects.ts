@@ -474,6 +474,11 @@ export const TOOL_EFFECTS: Readonly<Record<string, ToolEffects>> = {
     mutatesDevice: true,
     idempotent: false,
   }),
+  wait_adb_boot: effects({
+    mutatesSession: true,
+    launchesProcess: true,
+    accessesNetwork: true,
+  }),
   search_android_classes: effects({
     mutatesSession: true,
     launchesProcess: true,
@@ -490,6 +495,11 @@ export const TOOL_EFFECTS: Readonly<Record<string, ToolEffects>> = {
     writesFilesystem: true,
   }),
   trace_android_references: effects({
+    mutatesSession: true,
+    launchesProcess: true,
+    writesFilesystem: true,
+  }),
+  trace_android_resource_references: effects({
     mutatesSession: true,
     launchesProcess: true,
     writesFilesystem: true,

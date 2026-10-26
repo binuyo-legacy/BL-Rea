@@ -74,4 +74,12 @@ export const registerAndroidTools = (
     toolRegistrationOptions(referencesContract),
     handler(referencesContract),
   );
+  const resourceReferencesContract = toolContract(
+    "trace_android_resource_references",
+  );
+  server.registerTool(
+    resourceReferencesContract.name,
+    toolRegistrationOptions(resourceReferencesContract),
+    handler(resourceReferencesContract),
+  );
 };

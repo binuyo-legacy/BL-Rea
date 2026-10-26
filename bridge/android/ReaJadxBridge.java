@@ -9,6 +9,9 @@ import jadx.api.plugins.input.data.ICodeReader;
 import jadx.api.plugins.input.data.IMethodRef;
 import jadx.api.plugins.input.insns.InsnIndexType;
 import jadx.api.plugins.input.insns.Opcode;
+import jadx.api.plugins.input.insns.custom.ISwitchPayload;
+import jadx.api.plugins.input.data.IFieldRef;
+import jadx.core.utils.android.AndroidResourcesMap;
 import jadx.core.dex.info.MethodInfo;
 import jadx.core.dex.nodes.*;
 import java.io.PrintStream;
@@ -244,8 +247,8 @@ class ReaJadxBridge {
     return Collections.unmodifiableMap(summary);
   }
 
-  private ClassSnapshot selected(JsonObject args) {
-    JadxSession current = session();
+  /** Snapshot every class identity once per session, before code generation can rewrite aliases. */
+  private void ensureIndex(JadxSession current) {
     if (indexedSession != current) {
       Map<String, List<ClassSnapshot>> index = new LinkedHashMap<>();
       if (!current.getClasses().isEmpty()) {
@@ -316,6 +319,10 @@ class ReaJadxBridge {
       classes = Collections.unmodifiableMap(index);
       indexedSession = current;
     }
+  }
+
+  private ClassSnapshot selected(JsonObject args) {
+    ensureIndex(session());
     String name = string(args, "class_name");
     List<ClassSnapshot> candidates = classes.get(name);
     if (candidates == null) throw new InputFailure("class_name", "Exact class not found: " + name
@@ -415,6 +422,10 @@ class ReaJadxBridge {
   // JSON-RPC/CallToolResult envelope and generated numeric request id, and
   // account for JSON text being escaped again inside TextContent.
   private static final int MAX_XREF_TEXT_BYTES = 8 * 1024 * 1024 - 1024;
+  // A resource scan reaches the client about four times over: raw_result keeps the
+  // escaped reply, the normalized result repeats every site, and MCP sends both
+  // structured content and text. 2 MiB keeps that frame under the 10 MiB default.
+  private static final int MAX_RESOURCE_SCAN_BYTES = 2 * 1024 * 1024;
   private static int escapedJsonBytes(Object value) {
     return JSON.toJson(JSON.toJson(value)).getBytes(StandardCharsets.UTF_8).length;
   }
@@ -462,6 +473,221 @@ class ReaJadxBridge {
     return new DirectInvokes(sites, exhaustive[0]);
   }
 
+  private record ResourceRequest(String requested, String pkg, String type, String name,
+      boolean framework, List<Integer> ids, boolean foreign) {}
+
+  private static Map<String, List<Integer>> byName(Map<Integer, String> names) {
+    Map<String, List<Integer>> result = new HashMap<>();
+    for (Map.Entry<Integer, String> entry : names.entrySet())
+      result.computeIfAbsent(entry.getValue(), ignored -> new ArrayList<>()).add(entry.getKey());
+    result.values().forEach(Collections::sort);
+    return result;
+  }
+
+  /**
+   * Selectors come from the identity frozen before code generation, so they are the ones
+   * inspect_android_method accepts. A class absent from that index cannot be inspected and
+   * has no frozen identity; its live names are reported.
+   */
+  private static Map<String, Object> resourceSite(String kind, ClassNode cls, ClassSnapshot frozen,
+      MethodNode method, int offset, Opcode opcode) {
+    String className = cls.getFullName();
+    String methodName = method.getAlias();
+    int overloadIndex = 0;
+    if (frozen != null) {
+      className = String.valueOf(frozen.summary().get("full_name"));
+      String shortId = method.getMethodInfo().getShortId();
+      MethodSnapshot match = null;
+      for (MethodSnapshot candidate : frozen.methods())
+        if (candidate.shortId().equals(shortId)) { match = candidate; break; }
+      if (match == null)
+        throw new IllegalStateException("No frozen method identity for " + method.getMethodInfo().getRawFullId());
+      methodName = match.name();
+      for (MethodSnapshot candidate : frozen.methods()) {
+        if (candidate == match) break;
+        if (candidate.name().equals(methodName)) overloadIndex++;
+      }
+    } else {
+      List<MethodNode> sameName = new ArrayList<>();
+      for (MethodNode candidate : cls.getMethods())
+        if (candidate.getAlias().equals(methodName)) sameName.add(candidate);
+      overloadIndex = sameName.indexOf(method);
+    }
+    Map<String, Object> site = new LinkedHashMap<>();
+    site.put("kind", kind);
+    site.put("class_name", className);
+    site.put("raw_class_name", cls.getRawName());
+    site.put("top_class", cls.getTopParentClass().getFullName());
+    site.put("method_name", methodName);
+    site.put("overload_index", overloadIndex);
+    site.put("raw_method_id", method.getMethodInfo().getRawFullId());
+    site.put("dex_entry", method.getInputFileName());
+    site.put("dex_code_unit_offset", offset);
+    site.put("opcode", opcode.name());
+    return site;
+  }
+
+  /**
+   * Resolve resource names to integer IDs through the APK resource table, or JADX's bundled
+   * framework map for the android package, then scan every method's raw DEX instructions once
+   * for constant loads, switch keys, and R-field reads of those resources.
+   */
+  private CallToolResult resourceReferences(JsonObject args) {
+    JadxSession current = session();
+    JsonElement listed = args.get("resources");
+    if (listed == null || !listed.isJsonArray() || listed.getAsJsonArray().isEmpty())
+      throw new IllegalArgumentException("resources must be a non-empty array of strings");
+    int maxSites = integer(args, "max_sites", 100);
+    ensureIndex(current);
+    Map<ClassNode, ClassSnapshot> frozenClasses = new IdentityHashMap<>();
+    for (List<ClassSnapshot> snapshots : classes.values())
+      for (ClassSnapshot snapshot : snapshots) frozenClasses.put(snapshot.node().getClassNode(), snapshot);
+    RootNode root = current.getClasses().isEmpty() ? null
+        : current.getClasses().get(0).getClassNode().root();
+    Map<String, List<Integer>> app = root == null ? Map.of()
+        : byName(root.getConstValues().getResourcesNames());
+    Map<String, List<Integer>> framework = byName(AndroidResourcesMap.getMap());
+    String appPackage = root == null ? null : root.getAppPackage();
+    List<ResourceRequest> requests = new ArrayList<>();
+    for (JsonElement element : listed.getAsJsonArray()) {
+      if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString())
+        throw new IllegalArgumentException("resources must contain strings");
+      String requested = element.getAsString();
+      int colon = requested.indexOf(':');
+      String pkg = colon < 0 ? null : requested.substring(0, colon);
+      String rest = colon < 0 ? requested : requested.substring(colon + 1);
+      int slash = rest.indexOf('/');
+      if (slash <= 0 || slash == rest.length() - 1)
+        throw new IllegalArgumentException("Resource must be [package:]type/name: " + requested);
+      String type = rest.substring(0, slash);
+      String name = rest.substring(slash + 1);
+      boolean isFramework = "android".equals(pkg);
+      // A qualifier naming another app is unresolved here: its ids and R fields are not this APK's.
+      boolean foreign = pkg != null && !isFramework && !pkg.equals(appPackage);
+      List<Integer> ids = foreign ? List.of()
+          : (isFramework ? framework : app).getOrDefault(type + "/" + name, List.of());
+      requests.add(new ResourceRequest(requested, pkg, type, name, isFramework, ids, foreign));
+    }
+    Map<Long, List<Integer>> literals = new HashMap<>();
+    Map<String, List<Integer>> fieldReads = new HashMap<>();
+    List<List<Map<String, Object>>> sites = new ArrayList<>();
+    List<List<Map<String, Object>>> declarations = new ArrayList<>();
+    int[] totals = new int[requests.size()];
+    int[] fieldTotals = new int[requests.size()];
+    for (int index = 0; index < requests.size(); index++) {
+      ResourceRequest request = requests.get(index);
+      for (int id : request.ids())
+        literals.computeIfAbsent((long) id, ignored -> new ArrayList<>()).add(index);
+      if (!request.foreign())
+        fieldReads.computeIfAbsent(request.type() + "/" + request.name(), ignored -> new ArrayList<>())
+            .add(index);
+      sites.add(new ArrayList<>());
+      declarations.add(new ArrayList<>());
+    }
+    int[] scanned = {0};
+    // getClasses(true) is the full list: inner and anonymous classes (click handlers) included.
+    List<ClassNode> classNodes = root == null ? List.of() : root.getClasses(true);
+    // Sites and declarations share the transport budget left after the fixed
+    // response; matches past it are still counted so coverage stays partial.
+    InvokeBudget budget = new InvokeBudget(MAX_RESOURCE_SCAN_BYTES
+        - escapedJsonBytes(resourceResponse(requests, maxSites, Integer.MAX_VALUE,
+            Integer.MAX_VALUE, Integer.MAX_VALUE, null, null, null, null)));
+    for (ClassNode cls : classNodes) {
+      String rawName = cls.getRawName();
+      int marker = rawName.lastIndexOf(".R$");
+      if (marker >= 0) {
+        String type = rawName.substring(marker + 3);
+        boolean frameworkClass = rawName.equals("android.R$" + type);
+        for (FieldNode field : cls.getFields()) {
+          String fieldName = field.getFieldInfo().getName();
+          List<Integer> matches = fieldReads.get(type + "/" + fieldName);
+          if (matches == null) continue;
+          for (int index : matches) {
+            if (requests.get(index).framework() != frameworkClass) continue;
+            fieldTotals[index]++;
+            Map<String, Object> declaration = Map.of("class_name", rawName, "field_name", fieldName,
+                // JADX synthesizes an app R class from the resource table when the APK lacks one.
+                "origin", cls.getClsData() == null ? "jadx_generated" : "dex");
+            if (budget.admit(declaration)) declarations.get(index).add(declaration);
+          }
+        }
+      }
+      for (MethodNode method : cls.getMethods()) {
+        ICodeReader code = method.getCodeReader();
+        if (code == null) continue;
+        scanned[0]++;
+        code.visitInstructions(insn -> {
+          insn.decode();
+          Opcode opcode = insn.getOpcode();
+          Set<Integer> matched = new LinkedHashSet<>();
+          String kind = null;
+          if (opcode == Opcode.CONST || opcode == Opcode.CONST_WIDE) {
+            List<Integer> hit = literals.get(insn.getLiteral());
+            if (hit != null) matched.addAll(hit);
+            kind = "const_literal";
+          } else if (opcode == Opcode.PACKED_SWITCH_PAYLOAD || opcode == Opcode.SPARSE_SWITCH_PAYLOAD) {
+            if (insn.getPayload() instanceof ISwitchPayload payload)
+              for (int key : payload.getKeys()) {
+                List<Integer> hit = literals.get((long) key);
+                if (hit != null) matched.addAll(hit);
+              }
+            kind = "switch_case";
+          } else if (insn.getIndexType() == InsnIndexType.FIELD_REF && opcode.name().startsWith("SGET")) {
+            IFieldRef field = insn.getIndexAsField();
+            String parent = field.getParentClassType();
+            int rMarker = parent.lastIndexOf("/R$");
+            if (rMarker >= 0 && parent.endsWith(";")) {
+              String type = parent.substring(rMarker + 3, parent.length() - 1);
+              boolean frameworkParent = parent.equals("Landroid/R$" + type + ";");
+              List<Integer> hit = fieldReads.get(type + "/" + field.getName());
+              if (hit != null)
+                for (int index : hit)
+                  if (requests.get(index).framework() == frameworkParent) matched.add(index);
+              kind = "r_field_read";
+            }
+          }
+          for (int index : matched) {
+            totals[index]++;
+            if (sites.get(index).size() >= maxSites) continue;
+            Map<String, Object> site = resourceSite(kind, cls, frozenClasses.get(cls), method, insn.getOffset(), opcode);
+            if (budget.admit(site)) sites.get(index).add(site);
+          }
+        });
+      }
+    }
+    return json(resourceResponse(requests, maxSites, classNodes.size(), scanned[0], app.size(),
+        totals, fieldTotals, sites, declarations));
+  }
+
+  /** Response shape; null lists produce the empty, maximal-count skeleton used for budgeting. */
+  private static Map<String, Object> resourceResponse(List<ResourceRequest> requests, int maxSites,
+      int classes, int methods, int appNames, int[] totals, int[] fieldTotals,
+      List<List<Map<String, Object>>> sites, List<List<Map<String, Object>>> declarations) {
+    List<Map<String, Object>> results = new ArrayList<>();
+    for (int index = 0; index < requests.size(); index++) {
+      ResourceRequest request = requests.get(index);
+      Map<String, Object> result = new LinkedHashMap<>();
+      result.put("requested", request.requested());
+      result.put("package", request.pkg() == null ? "" : request.pkg());
+      result.put("type", request.type());
+      result.put("name", request.name());
+      result.put("table", request.framework() ? "framework" : "app");
+      result.put("ids", request.ids());
+      result.put("total_r_fields", fieldTotals == null ? Integer.MAX_VALUE : fieldTotals[index]);
+      result.put("r_fields", declarations == null ? List.of() : declarations.get(index));
+      result.put("total_sites", totals == null ? Integer.MAX_VALUE : totals[index]);
+      result.put("sites", sites == null ? List.of() : sites.get(index));
+      results.add(result);
+    }
+    Map<String, Object> response = new LinkedHashMap<>();
+    response.put("classes_scanned", classes);
+    response.put("methods_scanned", methods);
+    response.put("app_resource_names", appNames);
+    response.put("max_sites", maxSites);
+    response.put("resources", results);
+    return response;
+  }
+
   private CallToolResult handle(String name, kotlinx.serialization.json.JsonObject input) {
     JsonObject args = JsonParser.parseString(input.toString()).getAsJsonObject();
     if (name.equals("rea_jvm_status")) return json(Map.of(
@@ -470,6 +696,7 @@ class ReaJadxBridge {
         "available_processors", Runtime.getRuntime().availableProcessors(),
         "java_version", System.getProperty("java.version"),
         "metadata_scope", "parsed_members"));
+    if (name.equals("rea_resource_references")) return resourceReferences(args);
     JadxSession current = session();
     if (name.equals("get_app_info")) return json(manifest(current).summary());
     if (name.equals("get_android_manifest"))
@@ -608,6 +835,22 @@ class ReaJadxBridge {
       registerBridgeTool(server, bridge, name,
           new ToolSchema(null, new kotlinx.serialization.json.JsonObject(Map.of()), List.of(), null), description);
     }
+    Map<String, kotlinx.serialization.json.JsonElement> resourceProperties = new LinkedHashMap<>();
+    resourceProperties.put("resources", new kotlinx.serialization.json.JsonObject(Map.of(
+        "type", kotlinx.serialization.json.JsonElementKt.JsonPrimitive("array"),
+        "items", new kotlinx.serialization.json.JsonObject(Map.of(
+            "type", kotlinx.serialization.json.JsonElementKt.JsonPrimitive("string"))))));
+    resourceProperties.put("max_sites", new kotlinx.serialization.json.JsonObject(Map.of(
+        "type", kotlinx.serialization.json.JsonElementKt.JsonPrimitive("integer"))));
+    Tool resources = new Tool("rea_resource_references",
+        new ToolSchema(null, new kotlinx.serialization.json.JsonObject(resourceProperties),
+            List.of("resources"), null),
+        "Resolve [package:]type/name resources to IDs and list raw DEX constant, switch, and R-field uses",
+        null, null, null, null, null, null);
+    server.addTool(resources, (connection, request, continuation) -> {
+      try { return bridge.handle("rea_resource_references", request.getArguments()); }
+      catch (IllegalArgumentException error) { return text(error.getMessage(), true); }
+    });
     for (String name : List.of("list_classes", "get_class_summary",
         "get_method_body", "get_xrefs_to_class", "get_xrefs_to_method")) {
       Tool tool = server.getTools().get(name).getTool();

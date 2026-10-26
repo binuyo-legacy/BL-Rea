@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { z } from "zod";
 
 import {
   analyzeJadxRequest,
@@ -916,3 +917,191 @@ it.each([
     });
   },
 );
+
+/** A tool port that only answers the bridge's JSON calls. */
+const jsonPort = (json: JadxToolPort["json"]): JadxToolPort => ({
+  listClasses: () =>
+    Promise.reject(new Error("unexpected class inventory call")),
+  json,
+  text: () => Promise.reject(new Error("unexpected text call")),
+});
+
+it("maps UI resource ids to unsigned IDs and bounded code sites", async () => {
+  const calls: unknown[] = [];
+  const site = {
+    kind: "const_literal",
+    class_name: "fixture.Home",
+    raw_class_name: "fixture.Home",
+    top_class: "fixture.Home",
+    method_name: "initSearch",
+    overload_index: 0,
+    raw_method_id: "Lfixture/Home;->initSearch()V",
+    dex_entry: "classes.dex",
+    dex_code_unit_offset: 4,
+    opcode: "CONST",
+  };
+  const scan = {
+    classes_scanned: 3,
+    methods_scanned: 9,
+    app_resource_names: 2,
+    max_sites: 1,
+    resources: [
+      {
+        requested: "fixture:id/search",
+        package: "fixture",
+        type: "id",
+        name: "search",
+        table: "app",
+        ids: [0x7f0c0523],
+        total_r_fields: 1,
+        r_fields: [
+          {
+            class_name: "fixture.R$id",
+            field_name: "search",
+            origin: "jadx_generated",
+          },
+        ],
+        total_sites: 2,
+        sites: [site],
+      },
+      {
+        requested: "android:id/title",
+        package: "android",
+        type: "id",
+        name: "title",
+        table: "framework",
+        ids: [0x01020016],
+        total_r_fields: 1,
+        r_fields: [],
+        total_sites: 0,
+        sites: [],
+      },
+      {
+        requested: "other.app:id/search",
+        package: "other.app",
+        type: "id",
+        name: "search",
+        table: "app",
+        ids: [],
+        total_r_fields: 0,
+        r_fields: [],
+        total_sites: 0,
+        sites: [],
+      },
+      {
+        requested: "id/missing",
+        package: "",
+        type: "id",
+        name: "missing",
+        table: "app",
+        ids: [],
+        total_r_fields: 0,
+        r_fields: [],
+        total_sites: 0,
+        sites: [],
+      },
+    ],
+  };
+  const tools = jsonPort((name, input) => {
+    calls.push([name, input]);
+    return Promise.resolve(scan);
+  });
+  const request = {
+    operation: "trace_android_resource_references" as const,
+    input: androidInputSchemas.trace_android_resource_references.parse({
+      path: "/fixture.apk",
+      resource_ids: [
+        "fixture:id/search",
+        "android:id/title",
+        "other.app:id/search",
+        "id/missing",
+      ],
+      max_sites_per_resource: 1,
+    }),
+  };
+  const result = await analyzeJadxRequest(tools, request, {} as never, engine);
+  expect(calls).toEqual([
+    [
+      "rea_resource_references",
+      {
+        resources: [
+          "fixture:id/search",
+          "android:id/title",
+          "other.app:id/search",
+          "id/missing",
+        ],
+        max_sites: 1,
+      },
+    ],
+  ]);
+  expect(result).toMatchObject({
+    scan_unit: "dex_instruction",
+    resources: [
+      {
+        package_name: "fixture",
+        resolution: "resolved",
+        ids: ["0x7f0c0523"],
+        total_sites: 2,
+        coverage: "partial",
+        sites: [site],
+      },
+      // A declaration dropped by the transport budget still makes coverage partial.
+      { table: "framework", ids: ["0x01020016"], coverage: "partial" },
+      // Another app's qualifier never borrows this APK's code sites.
+      {
+        package_name: "other.app",
+        resolution: "unresolved",
+        ids: [],
+        total_sites: 0,
+        sites: [],
+      },
+      { package_name: null, resolution: "unresolved", ids: [] },
+    ],
+  });
+
+  // A producer answering another request is not attributed to the caller.
+  await expect(
+    analyzeJadxRequest(
+      jsonPort(() =>
+        Promise.resolve({
+          ...scan,
+          resources: [...scan.resources].reverse(),
+        }),
+      ),
+      request,
+      {} as never,
+      engine,
+    ),
+  ).rejects.toThrow("another request");
+});
+
+it("advertises a resource-id pattern valid in unicode-sets mode", () => {
+  const advertised = z.toJSONSchema(
+    androidInputSchemas.trace_android_resource_references,
+  ) as unknown as {
+    properties: { resource_ids: { items: { pattern: string } } };
+  };
+  const source = advertised.properties.resource_ids.items.pattern;
+  expect(() => new RegExp(source, "v")).not.toThrow();
+  expect(new RegExp(source, "v").test("com.example:some-type/login")).toBe(
+    true,
+  );
+});
+
+it("admits uiautomator resource-id spellings only", () => {
+  const schema = androidInputSchemas.trace_android_resource_references;
+  for (const resource of [
+    "com.example.app:id/login",
+    "android:id/title",
+    "id/login",
+  ])
+    expect(
+      schema.safeParse({ path: "/a.apk", resource_ids: [resource] }).success,
+      resource,
+    ).toBe(true);
+  for (const resource of ["login", "com.example:/login", "id/", ":id/x"])
+    expect(
+      schema.safeParse({ path: "/a.apk", resource_ids: [resource] }).success,
+      resource,
+    ).toBe(false);
+});

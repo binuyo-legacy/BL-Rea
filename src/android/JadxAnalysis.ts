@@ -13,6 +13,7 @@ import {
   jadxClassSchema,
   jadxLoadSchema,
   jadxMethodSchema,
+  jadxResourceReferencesSchema,
   jadxXrefsSchema,
   normalizeJadxText,
 } from "./JadxProtocol.js";
@@ -68,7 +69,12 @@ const classSummary = async (
   tools: JadxToolPort,
   request: Exclude<
     AndroidRequest,
-    { operation: "inspect_android_package" | "search_android_classes" }
+    {
+      operation:
+        | "inspect_android_package"
+        | "search_android_classes"
+        | "trace_android_resource_references";
+    }
   >,
 ): Promise<ClassSummary> => {
   // Only class inspection reports DEX static values; method and reference
@@ -289,6 +295,8 @@ export const analyzeJadxRequest = async (
     return inspectPackage(tools, loaded, engine);
   if (request.operation === "search_android_classes")
     return searchClasses(tools, request, loaded, engine);
+  if (request.operation === "trace_android_resource_references")
+    return traceResourceReferences(tools, request, engine);
   const summary = await classSummary(tools, request);
   if (request.operation === "inspect_android_class")
     return androidResultSchemas.inspect_android_class.parse({
@@ -385,5 +393,65 @@ const traceReferences = async (
     })),
     coverage: "complete",
     reference_unit: "using_node",
+  });
+};
+
+/** Java reports resource IDs as signed ints; present them as unsigned hex. */
+const resourceIdHex = (id: number) =>
+  `0x${(id >>> 0).toString(16).padStart(8, "0")}`;
+
+const traceResourceReferences = async (
+  tools: JadxToolPort,
+  request: Extract<
+    AndroidRequest,
+    { operation: "trace_android_resource_references" }
+  >,
+  engine: Engine,
+): Promise<JsonValue> => {
+  const scan = jadxResourceReferencesSchema.parse(
+    await tools.json("rea_resource_references", {
+      resources: request.input.resource_ids,
+      max_sites: request.input.max_sites_per_resource,
+    }),
+  );
+  if (
+    scan.max_sites !== request.input.max_sites_per_resource ||
+    scan.resources.length !== request.input.resource_ids.length ||
+    scan.resources.some(
+      (resource, index) =>
+        resource.requested !== request.input.resource_ids[index] ||
+        resource.sites.length >
+          Math.min(resource.total_sites, scan.max_sites) ||
+        resource.r_fields.length > resource.total_r_fields,
+    )
+  )
+    throw new AnalysisOutputError(
+      request.operation,
+      "JADX resource scan returned another request or inconsistent site counts",
+    );
+  return androidResultSchemas.trace_android_resource_references.parse({
+    engine,
+    classes_scanned: scan.classes_scanned,
+    methods_scanned: scan.methods_scanned,
+    app_resource_names: scan.app_resource_names,
+    resources: scan.resources.map((resource) => ({
+      requested: resource.requested,
+      package_name: resource.package === "" ? null : resource.package,
+      type: resource.type,
+      name: resource.name,
+      table: resource.table,
+      resolution: resource.ids.length === 0 ? "unresolved" : "resolved",
+      ids: resource.ids.map(resourceIdHex),
+      total_r_fields: resource.total_r_fields,
+      r_fields: resource.r_fields,
+      total_sites: resource.total_sites,
+      coverage:
+        resource.sites.length < resource.total_sites ||
+        resource.r_fields.length < resource.total_r_fields
+          ? "partial"
+          : "complete",
+      sites: resource.sites,
+    })),
+    scan_unit: "dex_instruction",
   });
 };

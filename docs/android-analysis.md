@@ -230,6 +230,36 @@ instructions into field declarations, leaving an empty or incomplete method
 body. The selected method's disassembly preserves those instructions and retains
 the same source byte limit and explicit truncation reporting.
 
+### Map UI resource ids to code
+
+`trace_android_resource_references` connects a screen element to the code that
+handles it. Pass `resource-id` values exactly as `adb shell uiautomator dump` reports them:
+
+```sh
+rea trace-android-resource-references /path/Example.apk "com.example:id/login,android:id/title" --max-sites 20
+```
+
+Each id resolves through the APK resource table, or through JADX's bundled
+framework map for the `android` package, to its integer `ids`. One pass over
+every method's raw DEX instructions then reports `sites`: `const_literal` loads
+(for example `findViewById`), `switch_case` keys (click dispatch on
+`getId()`), and `r_field_read` reads of non-final library `R` fields. Open a site
+with `inspect_android_method` using its `class_name` (the lookup name, which JADX may alias; `raw_class_name` keeps the DEX name), `method_name` and `overload_index`.
+
+- `resolution: "unresolved"` means the table has no such name; it is not
+  evidence that the view is unused.
+- `r_fields` lists `R$type` declarations; `origin: "jadx_generated"` marks an R
+  class JADX synthesized from the resource table because the APK has none.
+- `total_sites` and `total_r_fields` are exact; `coverage: "partial"` means
+  `max_sites_per_resource` or the scan's 2 MiB admission budget bounded the
+  returned `sites` or `r_fields`. That budget is smaller than the bridge's 8 MiB
+  frame because the MCP result repeats every site as raw, normalized and
+  structured-plus-text copies.
+- The scan does not read layout XML, data binding, reflection
+  (`getIdentifier`), or `fill-array-data` payloads (an `int[]` initialized from
+  `R.id` constants), and a literal equal to an id is not proof of a view
+  lookup. Views referenced only from layouts can show zero code sites.
+
 ## Interpret the result
 
 - Package inspection retains decoded manifest XML, summary declarations,
