@@ -192,7 +192,11 @@ it("returns a directly usable partial analysis reference for an oversized timeou
     );
   const nextRoot = await createTestTempDirectory("rea-js-timeout-recovery-");
   await writeFile(join(nextRoot, "main.js"), "export const recovered = 9;\n");
-  const { client, transport, diagnostics } = createResourceClient();
+  // Keep capacity for the 1,500 retained sources and the next analysis so this
+  // timeout regression does not depend on when the parent collects garbage.
+  // The analysis worker remains capped at 128 MiB; the memory case above keeps
+  // its separate 512 MiB parent ceiling.
+  const { client, transport, diagnostics } = createResourceClient(1024);
   try {
     await client.connect(transport);
     const response = await client.callTool(
@@ -306,7 +310,7 @@ const verifyRecovery = async (
   await client.ping();
 };
 
-const createResourceClient = () => {
+const createResourceClient = (parentHeapMb = 512) => {
   const client = new Client({ name: "javascript-resources", version: "1" });
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -314,7 +318,7 @@ const createResourceClient = () => {
     cwd: process.cwd(),
     env: {
       PATH: process.env.PATH ?? "",
-      NODE_OPTIONS: "--max-old-space-size=512 --max-semi-space-size=8",
+      NODE_OPTIONS: `--max-old-space-size=${String(parentHeapMb)} --max-semi-space-size=8`,
     },
     stderr: "pipe",
   });
