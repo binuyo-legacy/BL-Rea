@@ -73,16 +73,8 @@ const browserSocketVersionSchema = z.object({
   jsVersion: z.string(),
 });
 
-const browserSocketTargetsSchema = z.object({
-  targetInfos: z.array(
-    z.object({
-      targetId: z.string().min(1),
-      type: z.string().min(1),
-      title: z.string().default(""),
-      url: z.string(),
-      attached: z.boolean().optional(),
-    }),
-  ),
+const browserSocketTargetListSchema = z.object({
+  targetInfos: z.array(z.unknown()),
 });
 
 /** Validated direct CDP WebSocket bound to one discovered page target. */
@@ -253,12 +245,27 @@ export const discoverCdpBrowserSocket = async (
     versionInput,
     operation,
   );
-  const targets = parseCdpEndpointValue(
-    browserSocketTargetsSchema,
+  const listed = parseCdpEndpointValue(
+    browserSocketTargetListSchema,
     targetsInput,
     operation,
   );
+  // Target.getTargets names the id targetId. Optional attached/title metadata
+  // follows the same sibling rule as HTTP /json/list.
+  const { targets, limitations } = parseCdpDiscoveryTargets(
+    listed.targetInfos.map((row) => {
+      if (typeof row !== "object" || row === null || Array.isArray(row))
+        return row;
+      const record = row as Record<string, unknown>;
+      if (!Object.hasOwn(record, "targetId")) return row;
+      const { targetId, ...rest } = record;
+      return { ...rest, id: targetId };
+    }),
+    operation,
+    "CDP Target.getTargets",
+  );
   return {
+    limitations,
     webSocket: { scope: "browser", url },
     version: {
       product: version.product,
@@ -267,12 +274,12 @@ export const discoverCdpBrowserSocket = async (
       user_agent: version.userAgent,
       js_version: version.jsVersion,
     },
-    targets: targets.targetInfos.map((target) => ({
-      id: target.targetId,
+    targets: targets.map((target) => ({
+      id: target.id,
       type: target.type,
       title: sanitizeTargetTitle(target.title, target.url),
       url: target.url,
-      attached: target.attached ?? null,
+      attached: target.attached,
     })),
   };
 };

@@ -7,7 +7,9 @@ import { WEB_RUNTIME_LIMITS } from "../domain/webRuntime.js";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { CdpConnection } from "./CdpConnection.js";
 import {
+  discoverCdpBrowserSocket,
   discoverCdpEndpoint,
   readCdpJson,
   withCdpDiscoveryDeadline,
@@ -320,6 +322,58 @@ it("names the HTTP discovery document budget when that response deadline expires
   expect(failure.userMessage).toContain("20 ms");
   expect(failure.userMessage).not.toContain(
     `${String(WEB_RUNTIME_LIMITS.protocolBytes)}-byte browser-socket message budget`,
+  );
+});
+
+it("keeps sibling browser-socket targets when attached metadata is malformed", async () => {
+  const replies: Record<string, unknown> = {
+    "Browser.getVersion": {
+      protocolVersion: "1.3",
+      product: "fixture",
+      revision: "fixture",
+      userAgent: "fixture",
+      jsVersion: "fixture",
+    },
+    "Target.getTargets": {
+      targetInfos: [
+        {
+          targetId: "bad",
+          type: "page",
+          title: "Bad",
+          url: "https://example.test/bad",
+          attached: "unknown",
+        },
+        { targetId: 1, type: "page", url: "https://example.test/dropped" },
+        {
+          targetId: "good",
+          type: "page",
+          title: "Good",
+          url: "https://example.test/good",
+          attached: false,
+        },
+      ],
+    },
+  };
+  const connection = {
+    async send(method: string): Promise<unknown> {
+      if (!(method in replies)) throw new Error(method);
+      return replies[method];
+    },
+  } as unknown as CdpConnection;
+  const discovery = await discoverCdpBrowserSocket(
+    connection,
+    "ws://127.0.0.1:9222/devtools/browser/fixture",
+    "list_browser_targets",
+  );
+  expect(discovery.targets.map(({ id, attached }) => [id, attached])).toEqual([
+    ["bad", null],
+    ["good", false],
+  ]);
+  expect(discovery.limitations?.join("\n")).toContain(
+    'CDP Target.getTargets row 0 target bad reported malformed attached metadata "unknown"',
+  );
+  expect(discovery.limitations?.join("\n")).toContain(
+    "CDP Target.getTargets row 1 was excluded because its target identity is malformed",
   );
 });
 

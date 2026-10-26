@@ -26,13 +26,14 @@ export interface CdpDiscoveryTarget {
 export const parseCdpDiscoveryTargets = (
   input: unknown,
   operation: BrowserObservationOperation,
+  source = "CDP /json/list",
 ): {
   readonly targets: readonly CdpDiscoveryTarget[];
   readonly limitations: readonly string[];
 } => {
   if (!Array.isArray(input))
     throw new BrowserObservationError(operation, "invalid_endpoint_response", {
-      detail: "CDP /json/list must return an array of target rows.",
+      detail: `${source} must return an array of target rows.`,
     });
   const targets: CdpDiscoveryTarget[] = [];
   const limitations: string[] = [];
@@ -40,7 +41,7 @@ export const parseCdpDiscoveryTargets = (
     const parsed = identitySchema.safeParse(row);
     if (!parsed.success) {
       limitations.push(
-        `CDP /json/list row ${String(index)} was excluded because its target identity is malformed: ${JSON.stringify(parsed.error.issues)}.`,
+        `${source} row ${String(index)} was excluded because its target identity is malformed: ${JSON.stringify(parsed.error.issues)}.`,
       );
       continue;
     }
@@ -51,11 +52,11 @@ export const parseCdpDiscoveryTargets = (
       typeof target.attached !== "boolean"
     )
       limitations.push(
-        `CDP /json/list row ${String(index)} target ${target.id} reported malformed attached metadata ${JSON.stringify(target.attached)}; attachment state is unknown.`,
+        `${source} row ${String(index)} target ${target.id} reported malformed attached metadata ${JSON.stringify(target.attached)}; attachment state is unknown.`,
       );
     if (target.title !== undefined && typeof target.title !== "string")
       limitations.push(
-        `CDP /json/list row ${String(index)} target ${target.id} reported malformed title metadata ${JSON.stringify(target.title)}; title is unavailable.`,
+        `${source} row ${String(index)} target ${target.id} reported malformed title metadata ${JSON.stringify(target.title)}; title is unavailable.`,
       );
     targets.push({
       id: target.id,
