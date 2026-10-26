@@ -979,7 +979,7 @@ describe("Ghidra installation version admission", () => {
     },
     {
       name: "different Ghidra line",
-      readText: () => "application.version=12.2.0\napplication.java.min=21\n",
+      readText: () => "application.version=13.0.0\napplication.java.min=21\n",
       probeJava: () => javaProbeOk<GhidraJavaObservation>(JAVA),
       failed: "version",
       code: "unsupported_version",
@@ -1024,7 +1024,7 @@ describe("Ghidra installation version admission", () => {
     );
     expect(result.status).toBe("unavailable");
     if (result.status !== "unavailable") return;
-    expect(result.rejection.reason).toContain("12.1.x");
+    expect(result.rejection.reason).toContain("12.x (>=12.1)");
     expect(result.rejection.reason).toContain(SUPPORTED_GHIDRA_VERSION);
     expect(result.checks.find(({ name }) => name === "java")).toMatchObject({
       status: "failed",
@@ -1054,6 +1054,31 @@ describe("Ghidra installation version admission", () => {
         }),
       ),
     ).toMatchObject({ status: "available", javaVersion: "17.0.20.1" });
+  });
+
+  it("accepts a newer compatible Ghidra release with the version recorded", async () => {
+    const result = await inspectGhidraInstallation(
+      {
+        resourceOwner: inspectionResources.owner,
+        environment: {},
+        installDir: INSTALL,
+        platform: "linux",
+        architecture: "x64",
+      },
+      host({
+        readText: () => "application.version=12.2.0\napplication.java.min=21\n",
+        probeJava: () => javaProbeOk<GhidraJavaObservation>(JAVA),
+      }),
+    );
+    expect(result).toMatchObject({
+      status: "available",
+      providerVersion: "12.2.0",
+    });
+    expect(
+      result.status === "available"
+        ? result.checks.find(({ name }) => name === "version")
+        : undefined,
+    ).toMatchObject({ status: "passed" });
   });
 });
 
