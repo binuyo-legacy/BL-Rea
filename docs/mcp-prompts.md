@@ -4,6 +4,16 @@ REA exposes six provider-neutral investigation workflows through the MCP
 `prompts` capability. They complement the generated tool catalog; they do not add, remove, or
 invoke tools by themselves.
 
+To find a section in the installed guidance bundle by analyst question, use
+`search_guidance` and pass a returned locator to `read_guidance_section`. The
+CLI equivalent is `rea guidance --query "exact JavaScript module"`, followed
+by `rea guidance --action read --locator LOCATOR`. Search is limited to the
+packaged managed skill files, works without providers or a target, and returns
+deterministically paged matches. Results are marked as documentation; locators
+are bound to the installed bundle and report stale or missing guidance without
+returning cached section content. A no-match result says nothing about analysis
+capability availability.
+
 ## Prompt inventory
 
 | Prompt                            | Purpose                                                                              |
