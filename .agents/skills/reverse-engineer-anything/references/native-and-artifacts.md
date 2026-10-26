@@ -13,6 +13,13 @@ Select columns, batch IDs and page individual facts; aliases remain unresolved.
 Unpaired observations do not prove additions/removals. Existing matched dossier
 pairs include inputs for `compare_functions`; otherwise analyze just chosen pairs.
 
+For a matching representation refusal, inspect `details.limit` and raise
+`native.matching_representation_bytes` with `update_analysis_settings` before
+retrying the unchanged MCP request. CLI launch seed:
+`REA_NATIVE_MATCHING_REPRESENTATION_BYTES`. The default is 96 MiB; the policy
+range is 1 byte to 1 GiB and does not bound process RSS. Keep the complete
+inventories: splitting them changes global name/body uniqueness.
+
 ## Apple app resources
 
 Use `open_bundle_resources` with the selected app path, then `inspect_plist`,
@@ -402,6 +409,21 @@ longest prefix of connections that have terminated. Dense scalar replies are
 encoded in bounded batches.
 The 25000 ms Cutter request deadline and the 256-candidate discovery budget
 still have no runtime override.
+
+## Selected native facts and call graphs
+
+For a large `get_call_graph`, or repeated `procedure_address`,
+`procedure_callees`, `procedure_callers` and `resolve_containing_procedure`
+queries, select `detail: "summary"` when the first 64 recorded observations
+suffice. Read further `native-observation` pages from the returned parent Evidence
+ID. Graph message IDs index that page's exact-text dictionary; keep level,
+source index, failed nodes, and partial/unknown relationship coverage.
+Read referenced source context through `native-context` facets `overview`,
+`analysis-profile`, `limitations` and `result-limitations`. Reuse inspected
+context/profile values only for the same digest; until caveats are read,
+interpretation beyond the returned facts remains unknown. Complete Evidence
+remains retained and exportable. Small complete replies can cost fewer tokens
+than additional context/page calls; count the completed task and discovery.
 
 ## Static memory and original file bytes
 
