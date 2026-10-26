@@ -176,10 +176,15 @@ const parseDocument = (
       JSON.parse(text.replace(/^\uFEFF/, "")),
       "The configuration root",
     );
+  // Gemini CLI loads settings with JSON.parse after stripping comments, so it
+  // accepts comments but rejects trailing commas and a UTF-8 BOM.
+  const gemini = format === "gemini";
+  if (gemini && text.startsWith("\uFEFF"))
+    throw new SyntaxError("Invalid JSON/JSONC at offset 0: UTF-8 BOM");
   const errors: ParseError[] = [];
   // Accept a UTF-8 BOM without shifting diagnostics or editing the original text.
   const jsonText = text.startsWith("\uFEFF") ? ` ${text.slice(1)}` : text;
-  const root = parseTree(jsonText, errors, { allowTrailingComma: true });
+  const root = parseTree(jsonText, errors, { allowTrailingComma: !gemini });
   const firstError = errors[0];
   if (firstError !== undefined)
     throw new SyntaxError(

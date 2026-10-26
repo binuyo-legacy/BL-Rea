@@ -133,7 +133,7 @@ export const readClientPolicyBlock = async (
     const parsed =
       path === client.configPath
         ? ok(userDocument)
-        : await readConfigurationFile(path, "json", resources);
+        : await readConfigurationFile(path, "gemini", resources);
     if (!parsed.ok) return parsed;
     if (parsed.value !== undefined)
       sources.push({ path, document: parsed.value });
@@ -170,7 +170,7 @@ export const readClientPolicyBlock = async (
       : ok(false);
     if (!includeWorkspace.ok) return includeWorkspace;
     if (includeWorkspace.value) {
-      const document = await readConfigurationFile(path, "json", resources);
+      const document = await readConfigurationFile(path, "gemini", resources);
       if (!document.ok) return document;
       if (document.value !== undefined) {
         const source = { path, document: document.value };

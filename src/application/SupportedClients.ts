@@ -49,6 +49,7 @@ export interface SetupClient {
   readonly format?:
     | "json"
     | "claude_code"
+    | "gemini"
     | "toml"
     | "vscode"
     | "copilot_cli"
@@ -545,7 +546,7 @@ export const SUPPORTED_CLIENT_DEFINITIONS = [
       join(env.GEMINI_CLI_HOME || home, ".gemini"),
     skillPath: ({ home, env }: ClientPathContext) =>
       join(env.GEMINI_CLI_HOME || home, ".agents", "skills"),
-    format: "json",
+    format: "gemini",
   },
   {
     name: "windsurf",
