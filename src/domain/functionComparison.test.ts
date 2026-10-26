@@ -32,6 +32,7 @@ const procedure = (address: string, name: string) => ({
       "Hopper's public Python API does not expose complete function body ranges",
   },
 });
+
 const dossier = (
   text: string,
   base: "0x1000" | "0x2000",
@@ -1624,5 +1625,27 @@ describe("function comparison unnamed reference endpoints", () => {
         functionSnapshotFixture(observe("b", unnamed("data"))),
       ).dimensions.find(({ dimension }) => dimension === "references"),
     ).toMatchObject({ status: "changed" });
+  });
+});
+
+describe("whitespace-only function symbols", () => {
+  it.each([" ", "\t", " \t "])("remain ambiguous (%j)", (name) => {
+    const blankNamed = (base: "0x1000" | "0x2000") =>
+      functionDossierSchema.parse({
+        ...dossier("return 0;", base),
+        procedure: {
+          ...procedure(base, name),
+          signature: "int helper(void)",
+          locals: [],
+        },
+      });
+    const result = compareFunctions(
+      functionSnapshotFixture(observe("f", blankNamed("0x1000"))),
+      functionSnapshotFixture(observe("0", blankNamed("0x2000"))),
+    );
+    expect(result.function_match.status).toBe("ambiguous");
+    expect(
+      result.dimensions.find(({ dimension }) => dimension === "identity"),
+    ).toMatchObject({ status: "unknown" });
   });
 });

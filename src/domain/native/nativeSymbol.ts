@@ -23,4 +23,4 @@ export const nativeSymbolOrigin = (
 export const hasStableNativeSymbol = (
   name: string,
   symbol: NativeSymbolMetadata | null | undefined,
-): boolean => name.length > 0 && nativeSymbolOrigin(symbol) === "named";
+): boolean => name.trim().length > 0 && nativeSymbolOrigin(symbol) === "named";

@@ -9,7 +9,7 @@ import {
   functionBodyEntryAgrees,
   functionDossierSchema,
 } from "../hopperValues.js";
-import { nativeSymbolOrigin } from "./nativeSymbol.js";
+import { hasStableNativeSymbol, nativeSymbolOrigin } from "./nativeSymbol.js";
 import {
   addressedValueSchema,
   nativeInventoryRowsSchemas,
@@ -208,13 +208,16 @@ const reportedSymbol = (
   const generated = names.some(
     (symbol) => nativeSymbolOrigin(symbol.symbol) === "generated",
   );
-  const named = names.some(
+  const namedOrigin = names.some(
     (symbol) => nativeSymbolOrigin(symbol.symbol) === "named",
   );
+  const stableName = names.some((symbol) =>
+    hasStableNativeSymbol(symbol.value, symbol.symbol),
+  );
   return {
-    value: row.value.length === 0 || generated || !named ? null : row.value,
+    value: generated || !stableName ? null : row.value,
     origin:
-      generated && named
+      generated && namedOrigin
         ? "conflicting"
         : names.some((symbol) => symbol.symbol !== undefined)
           ? "known"
