@@ -41,6 +41,19 @@ export const TOOL_KINDS = [
 /** Adapter family responsible for implementing a public MCP tool. */
 export type ToolKind = (typeof TOOL_KINDS)[number];
 
+/** Vendor-prefixed `_meta` key REA owns on advertised MCP definitions. */
+export const REA_MCP_META_KEY = "io.github.morluto/rea";
+
+/**
+ * Family advertised on each `tools/list` entry under {@link REA_MCP_META_KEY}
+ * so lazy-indexing clients can group tools without name heuristics. The value
+ * is the contract's `kind`, which `binary_session` also reports as
+ * `tool_availability.groups.surface` with complete detail.
+ */
+export type ToolFamilyMeta = {
+  readonly [REA_MCP_META_KEY]: { readonly family: ToolKind };
+};
+
 /** Single source of truth for a public MCP tool. */
 export interface ToolContract<
   Name extends string = string,
