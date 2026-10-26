@@ -33,6 +33,26 @@ it("retains distinct occurrences when ZIP paths normalize to the same child", as
   );
 });
 
+it("keeps a decomposed ZIP member name beside its NFC logical path", async () => {
+  // #5108: lookup uses NFC, but the source spelling must stay recoverable.
+  const root = await createTestTempDirectory("rea-zip-nfc-name-");
+  const path = join(root, "decomposed.zip");
+  await writeOrderedZip(path, ["café.txt", "plain.txt"]);
+
+  const inventory = await inventoryArtifact(path);
+  expect(inventory.occurrences).toContainEqual(
+    expect.objectContaining({
+      logical_path: "café.txt",
+      limitations: [
+        'Member name "café.txt" is not in Unicode NFC; its logical path uses the NFC spelling.',
+      ],
+    }),
+  );
+  expect(inventory.occurrences).toContainEqual(
+    expect.objectContaining({ logical_path: "plain.txt", limitations: [] }),
+  );
+});
+
 it.each([".", "././."])(
   "rejects a non-directory ZIP entry spelled %s instead of skipping it as a root marker",
   async (name) => {
