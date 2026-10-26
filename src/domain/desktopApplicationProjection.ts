@@ -1,5 +1,6 @@
 import { IL2CPP_METADATA_VERSIONS } from "./il2cpp/il2cppMetadata.js";
 import { digestCanonicalValue } from "./canonicalDigest.js";
+import { desktopPathConventions } from "./nativeConvention.js";
 import type { DesktopApplication, DesktopFile } from "./desktopApplication.js";
 
 /** Interpret only the facts admitted by the directory reader, never target bytes. */
@@ -50,13 +51,42 @@ export const projectDesktopApplication = (
     managed,
     "PE optional headers declare nonempty CLI directories; CLR execution and metadata validity remain unverified.",
   );
+  const mono = managed.filter((file) => has(file, "unity-assembly-reference"));
+  const monoDirectories = new Set(
+    mono.flatMap((file) =>
+      file.facts.flatMap((fact) =>
+        fact.kind === "unity-assembly-reference"
+          ? [fact.value.managed_directory]
+          : [],
+      ),
+    ),
+  );
+  for (const file of managed) {
+    const conventions = desktopPathConventions(file.path);
+    if (
+      conventions.unityPredefinedAssembly &&
+      conventions.unityManagedDirectory !== null &&
+      monoDirectories.has(conventions.unityManagedDirectory)
+    )
+      probe(
+        "inspect_managed_members",
+        file,
+        'Inventory types, members and user strings of this Unity predefined script assembly; its references and contents are unverified. Start with detail "summary" and page rows through inspect_analysis_view.',
+      );
+  }
+  for (const file of managed)
+    if (has(file, "unity-il2cpp-backup-convention"))
+      probe(
+        "inspect_managed_members",
+        file,
+        'Inventory types, members and user strings of this predefined script assembly in a Unity IL2CPP backup folder; its correspondence to the shipped native code is unknown. Start with detail "summary" and page rows through inspect_analysis_view.',
+      );
   for (const file of managed)
     probe(
       "inspect_managed_artifact",
       file,
       "Inspect the declared managed metadata and references.",
     );
-  const mono = managed.filter((file) => has(file, "unity-assembly-reference"));
   candidate(
     "unity-mono",
     mono,

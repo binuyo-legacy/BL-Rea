@@ -1,5 +1,5 @@
 import { desktopPathConventions } from "../domain/nativeConvention.js";
-import { isAbsolute } from "node:path";
+import { basename, isAbsolute } from "node:path";
 import {
   DirectoryArtifactReader,
   DirectoryArtifactRootFailure,
@@ -288,7 +288,7 @@ const scanDirectory = async (
         continue;
       }
       if (entry.kind !== "file") continue;
-      const managedRoot = addPathFacts(row);
+      const managedRoot = addPathFacts(row, basename(root.canonical_path));
       if (!probeSelected(entry)) continue;
       if (budget.bytes >= budget.maximum) {
         row.read_status = "unavailable";
@@ -451,8 +451,17 @@ const fileRow = (
   };
 };
 
-const addPathFacts = (row: DesktopFile): string | null => {
-  const conventions = desktopPathConventions(row.path);
+const addPathFacts = (row: DesktopFile, rootName: string): string | null => {
+  const conventions = desktopPathConventions(row.path, rootName);
+  if (
+    conventions.unityIl2cppBackupAssembly &&
+    conventions.unityIl2cppBackupDirectory !== null
+  )
+    row.facts.push({
+      kind: "unity-il2cpp-backup-convention",
+      offset: null,
+      value: { backup_directory: conventions.unityIl2cppBackupDirectory },
+    });
   if (conventions.electronArchive)
     row.facts.push({
       kind: "electron-asar-convention",
