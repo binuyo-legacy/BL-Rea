@@ -557,9 +557,9 @@ writing a registration ZCode cannot load.
 
 ## FreeBuff
 
-For FreeBuff, the proposed integration writes `mcpServers.rea` into the user-scope
+For FreeBuff, setup writes `mcpServers.rea` into the user-scope
 `~/.agents/mcp.json` shared-agent file. Entries carry `command`, `args`, and
-`env`; stdio is the default transport. The proposed personal skill location is
+`env`; stdio is the default transport. The personal skill location is
 `~/.agents/skills`, so setup installs its skill copy there. Because the same
 file doubles as ZCode's user-scope fallback (see above), a `freebuff`
 registration is also in the file ZCode uses until ZCode defines its own native server.
@@ -567,7 +567,7 @@ Setup and doctor detect FreeBuff from its own profile directory
 (`~/.config/freebuff-desktop`), not from the shared `.agents` folder that
 REA's skill installs create for every client.
 
-The configuration write and personal skill locations are proposed integration
+The configuration write and personal skill locations are integration
 boundaries. FreeBuff MCP loading and skill discovery have not been verified
 with an installed native FreeBuff client/version; filesystem tests cover REA's
 editing, discovery, and ownership behavior only. Automatic applicability
