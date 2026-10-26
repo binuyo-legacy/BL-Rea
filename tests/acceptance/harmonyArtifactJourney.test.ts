@@ -16,6 +16,10 @@ import {
 } from "../../src/domain/harmony/harmonyApplication.js";
 import { workspaceCliTest as test } from "../support/cli/workspaceCliFixture.js";
 
+const javascriptPaths = ["cts", "jsx", "mts", "ts", "tsx"].map(
+  (extension) => `assets/js/index.${extension}`,
+);
+
 const expectProjectionParity = (
   graph: HarmonyApplicationProjectionResult,
   cliReply: unknown,
@@ -45,10 +49,7 @@ const expectProjectionParity = (
   });
 };
 
-test("preserves Harmony archive formats through the public CLI/MCP lifecycle", async ({
-  cli,
-  workspace,
-}) => {
+async function harmonyArchive() {
   const writer = new ZipWriter(new Uint8ArrayWriter());
   await writer.add(
     "module.json",
@@ -58,12 +59,18 @@ test("preserves Harmony archive formats through the public CLI/MCP lifecycle", a
     "ets/modules.abc",
     new TextReader("opaque bytecode fixture"),
   );
-  const javascriptPaths = ["cts", "jsx", "mts", "ts", "tsx"].map(
-    (extension) => `assets/js/index.${extension}`,
-  );
+  await writer.add("pkgContextInfo.json", new TextReader("{}"));
+  await writer.add(".pages.info", new TextReader("page metadata fixture"));
   for (const path of javascriptPaths)
     await writer.add(path, new TextReader("export const value = 1;"));
-  const bytes = await writer.close();
+  return writer.close();
+}
+
+test("preserves Harmony archive formats through the public CLI/MCP lifecycle", async ({
+  cli,
+  workspace,
+}) => {
+  const bytes = await harmonyArchive();
   const environment = {
     PATH: process.env.PATH ?? "",
     HOME: workspace.root,
@@ -145,6 +152,18 @@ test("preserves Harmony archive formats through the public CLI/MCP lifecycle", a
         root_format: format,
         root_sha256: sha256,
         coverage: { status: "complete-within-inventory" },
+        unclassified_components: [
+          expect.objectContaining({
+            path: ".pages.info",
+            sha256: createHash("sha256")
+              .update("page metadata fixture")
+              .digest("hex"),
+          }),
+          expect.objectContaining({
+            path: "pkgContextInfo.json",
+            sha256: createHash("sha256").update("{}").digest("hex"),
+          }),
+        ],
       });
       expect(
         graph.components.manifests.map(({ path: member }) => member),
