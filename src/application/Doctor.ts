@@ -477,7 +477,8 @@ const skillIdentityCheck = (
   return {
     name: "skill:identity",
     ok: false,
-    classification: "config_drift",
+    classification:
+      skillIdentityState(identity) === "unknown" ? "unknown" : "config_drift",
     detail:
       issues !== undefined && issues.length > 0
         ? `Selected skill identity is ${skillIdentityState(identity)}: ${issues.map(({ path }) => path).join(", ")}.`
