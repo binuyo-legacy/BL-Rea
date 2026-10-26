@@ -1,5 +1,6 @@
 import { tmpdir } from "node:os";
 import { prepareProcessOwnershipInspection } from "../ProcessOwnershipObservation.js";
+import { nativePtyUsable } from "./ProcessTerminalBackend.js";
 
 export type ProcessCaptureCapability =
   | { readonly available: true; readonly backend: "node-pty" }
@@ -57,6 +58,16 @@ export const probeProcessCaptureCapability = async (
       available: false,
       backend: "node-pty",
       reason: ownershipReason,
+    };
+  // On musl the glibc prebuild loads through a compatibility shim and faults
+  // inside `forkpty`; probing it would kill the process doing the asking. The
+  // capture path selects the pipe backend there (see ProcessTerminalBackend).
+  if (!nativePtyUsable())
+    return {
+      available: false,
+      backend: "node-pty",
+      reason:
+        "this runtime has no usable native PTY (musl Linux uses the pipe capture backend instead), so the native probe was not attempted",
     };
   if (platform === "darwin") {
     try {

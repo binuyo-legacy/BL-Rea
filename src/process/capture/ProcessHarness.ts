@@ -68,6 +68,10 @@ import {
   scheduleScenarioInteractions,
 } from "./ProcessCaptureJournal.js";
 import { makeProcessCaptureEnvironment } from "./ProcessCaptureEnvironment.js";
+import {
+  spawnProcessTerminal,
+  type ProcessTerminalBackend,
+} from "./ProcessTerminalBackend.js";
 import { classifyFilesystemEffects } from "./ProcessFilesystemEffects.js";
 import { processCaptureOwnershipUnavailableReason } from "./ProcessCaptureCapability.js";
 import {
@@ -88,6 +92,8 @@ import { monotonicProcessCaptureClock } from "./ProcessCaptureClock.js";
 interface StartedCaptureRuntime {
   readonly renderer: TerminalRenderer;
   readonly terminal: IPty;
+  /** What actually carried the command's streams; `pipe` means no TTY. */
+  readonly terminalBackend: ProcessTerminalBackend;
   readonly started: number;
   readonly startedAt: Date;
   readonly executableIdentity: ReturnType<typeof observeLaunchedExecutable>;
@@ -280,12 +286,12 @@ const startCaptureRuntime = async (
   const { ownershipEvidence } = options;
   let renderer: TerminalRenderer | undefined;
   let terminal: IPty | undefined;
+  let terminalBackend: ProcessTerminalBackend = "node-pty";
   let terminalObservation:
     | ReturnType<typeof createProcessTerminalFinalizer>
     | undefined;
   let stopSampler: ReturnType<typeof startProcessSampler> | undefined;
   try {
-    const { spawn } = await import("@lydell/node-pty");
     const selectedExecutable = await observeSelectedExecutable(
       scenario.executable,
       options.signal,
@@ -312,13 +318,20 @@ const startCaptureRuntime = async (
     // Completed executable facts do not authorize launch after cancellation
     // during the sampler's final metadata read or descriptor cleanup.
     assertNotCancelled(options.signal);
-    terminal = spawn(scenario.executable, [...scenario.arguments], {
-      cwd: scenario.working_directory,
-      env: makeProcessCaptureEnvironment(options),
-      cols: scenario.terminal.columns,
-      rows: scenario.terminal.rows,
-      name: "xterm-256color",
-    });
+    const spawned = await spawnProcessTerminal(
+      scenario.executable,
+      scenario.arguments,
+      {
+        cwd: scenario.working_directory,
+        env: makeProcessCaptureEnvironment(options),
+        cols: scenario.terminal.columns,
+        rows: scenario.terminal.rows,
+        name: "xterm-256color",
+      },
+      { signal: options.signal },
+    );
+    terminal = spawned.terminal;
+    terminalBackend = spawned.backend;
     options.onSpawn(terminal.pid);
     options.observationBuffer.target_pid = {
       state: "available",
@@ -359,6 +372,7 @@ const startCaptureRuntime = async (
     return {
       renderer,
       terminal,
+      terminalBackend,
       ownershipEvidence,
       started,
       startedAt,
@@ -645,6 +659,7 @@ const completeCapture = async (options: {
   }
   options.observationBuffer.manifest = { state: "available", value: manifest };
   return buildCaptureResult({
+    terminalBackend: runtime.terminalBackend,
     frames: options.frames,
     exit: { ...options.exit, reason },
     samples: options.samples,

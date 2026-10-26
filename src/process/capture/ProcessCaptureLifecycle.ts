@@ -30,6 +30,7 @@ import {
   type ProcessCaptureCleanupRetainer,
 } from "./ProcessCaptureRead.js";
 import { classifyFilesystemEffects } from "./ProcessFilesystemEffects.js";
+import type { ProcessTerminalBackend } from "./ProcessTerminalBackend.js";
 import {
   cleanupOwnedProcessGroup,
   type OwnedProcessGroup,
@@ -156,6 +157,8 @@ export const captureExitObservation = <
 });
 
 interface CaptureResultOptions {
+  /** `pipe` means the host had no usable PTY; the terminal was not observed. */
+  readonly terminalBackend?: ProcessTerminalBackend;
   readonly frames: readonly TerminalFrame[];
   readonly exit: {
     readonly exitCode: number;
@@ -388,6 +391,11 @@ export const buildCaptureResult = (
         ? ["Process-tree sampling ended with an incomplete observation."]
         : []),
       "Filesystem observations are before/after snapshots, not syscall traces.",
+      ...(options.terminalBackend === "pipe"
+        ? [
+            "This host has no usable native PTY; the command ran with piped standard streams, so TTY detection, terminal-size layout and full-screen rendering were not observed.",
+          ]
+        : []),
       "Inherited host environment variables are not recorded and may affect results.",
       ...(!hasFilesystemObservations ? [filesystemObservationUnknown] : []),
       ...filesystemUnknowns,
@@ -411,6 +419,15 @@ export const buildCaptureResult = (
         scope: "environment",
         reason: "Inherited host environment variables are not recorded.",
       },
+      ...(options.terminalBackend === "pipe"
+        ? [
+            {
+              scope: "terminal" as const,
+              reason:
+                "The command ran without a PTY, so terminal-dependent behavior is unknown.",
+            },
+          ]
+        : []),
       {
         scope: "network",
         reason: "Network activity is not observed by this capture.",
