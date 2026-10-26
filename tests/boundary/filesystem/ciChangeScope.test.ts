@@ -731,6 +731,14 @@ it.each([
     { code: true, runtime: true, apple: true, package: false, evm: false },
   ],
   [
+    "src/artifacts/NativeDmgArtifactReader.ts",
+    { code: true, runtime: true, apple: true, package: false, evm: false },
+  ],
+  [
+    "tests/acceptance/artifactDmgAttachmentRecoveryCli.test.ts",
+    { code: true, apple: true, package: false, runtime: false },
+  ],
+  [
     "scripts/verify/apple/example.mjs",
     { code: true, apple: true, package: false, runtime: false },
   ],
