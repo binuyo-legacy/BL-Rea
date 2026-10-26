@@ -39,6 +39,7 @@ interface GroupState {
   readonly statuses: Set<number>;
   readonly contentTypes: Set<string>;
   readonly queryNames?: Map<string, number[]>;
+  readonly responseCoverage?: NonNullable<Group["response_coverage"]>;
 }
 type Buckets = Map<string, Map<string, Map<string, Map<string, GroupState>>>>;
 
@@ -52,6 +53,7 @@ export class WebNetworkApiSurfaceAccumulator extends WebNetworkProjectionAccumul
   constructor(
     maximumBytes = WEB_NETWORK_CAPTURE_LIMITS.outputBytes,
     readonly includeQueryParameterNames = false,
+    readonly includeResponseCoverage = false,
   ) {
     super(maximumBytes, "API-surface");
   }
@@ -129,6 +131,12 @@ export class WebNetworkApiSurfaceAccumulator extends WebNetworkProjectionAccumul
     if (status !== null && !group?.statuses.has(status)) bytes += ENTRY_BYTES;
     if (mime !== null && !group?.contentTypes.has(mime))
       bytes += ENTRY_BYTES + textBytes(mime.length);
+    if (this.includeResponseCoverage) {
+      if (group === undefined) bytes += CAPTURE_CONTAINER_BYTES * 3;
+      // Include retained and projected ordinal slots before either array grows.
+      if (status === null) bytes += ENTRY_BYTES;
+      if (mime === null) bytes += ENTRY_BYTES;
+    }
     if (queryNames !== undefined) {
       if (group === undefined) bytes += CAPTURE_CONTAINER_BYTES;
       for (const name of queryNames) {
@@ -154,6 +162,14 @@ export class WebNetworkApiSurfaceAccumulator extends WebNetworkProjectionAccumul
         statuses: new Set(),
         contentTypes: new Set(),
         ...(queryNames === undefined ? {} : { queryNames: new Map() }),
+        ...(this.includeResponseCoverage
+          ? {
+              responseCoverage: {
+                unavailable_status_ordinals: [],
+                unavailable_content_type_ordinals: [],
+              },
+            }
+          : {}),
       };
       const byOrigin = this.#buckets.get(method) ?? new Map();
       this.#buckets.set(method, byOrigin);
@@ -169,6 +185,12 @@ export class WebNetworkApiSurfaceAccumulator extends WebNetworkProjectionAccumul
     }
     group.ordinals.push(ordinal);
     if (status === null || mime === null) this.#unavailableResponse = true;
+    if (group.responseCoverage !== undefined) {
+      if (status === null)
+        group.responseCoverage.unavailable_status_ordinals.push(ordinal);
+      if (mime === null)
+        group.responseCoverage.unavailable_content_type_ordinals.push(ordinal);
+    }
     if (status !== null) group.statuses.add(status);
     if (mime !== null) group.contentTypes.add(mime);
     if (queryNames !== undefined && group.queryNames !== undefined) {
@@ -214,6 +236,18 @@ export class WebNetworkApiSurfaceAccumulator extends WebNetworkProjectionAccumul
         record_ordinals: [...group.ordinals],
         statuses: [...group.statuses].sort((a, b) => a - b),
         content_types: [...group.contentTypes].sort(compare),
+        ...(group.responseCoverage === undefined
+          ? {}
+          : {
+              response_coverage: {
+                unavailable_status_ordinals: [
+                  ...group.responseCoverage.unavailable_status_ordinals,
+                ],
+                unavailable_content_type_ordinals: [
+                  ...group.responseCoverage.unavailable_content_type_ordinals,
+                ],
+              },
+            }),
         ...(group.queryNames === undefined
           ? {}
           : {

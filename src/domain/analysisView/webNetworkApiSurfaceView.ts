@@ -21,6 +21,12 @@ export const apiSurfaceViewSchema = z.strictObject({
     .describe(
       "Include distinct observed query parameter names and their original record ordinals; names do not establish required parameters or a complete API schema.",
     ),
+  include_response_coverage: z
+    .boolean()
+    .optional()
+    .describe(
+      "Locate unavailable status and content type facts using original record ordinals in each group; coverage applies only to retained records.",
+    ),
 });
 const ruleSchema = z.enum(ROUTE_RULES);
 const groupSchema = z.strictObject({
@@ -38,6 +44,14 @@ const groupSchema = z.strictObject({
   record_ordinals: z.array(z.int().nonnegative()),
   statuses: z.array(z.number()),
   content_types: z.array(z.string()),
+  response_coverage: z
+    .strictObject({
+      unavailable_status_ordinals: z.array(z.number().int().nonnegative()),
+      unavailable_content_type_ordinals: z.array(
+        z.number().int().nonnegative(),
+      ),
+    })
+    .optional(),
   query_parameter_names: z
     .array(
       z.strictObject({
@@ -76,13 +90,14 @@ export const apiSurfaceFields = {
   ),
 };
 
-/** Create the budget and query-name policy shared by admission and projection. */
+/** Create the budget and opt-in facts shared by admission and projection. */
 export const createApiSurfaceAccumulator = (
   view: AnalysisViewRequest,
 ): WebNetworkApiSurfaceAccumulator =>
   new WebNetworkApiSurfaceAccumulator(
     undefined,
     view.kind === "api-surface" && view.include_query_parameter_names === true,
+    view.kind === "api-surface" && view.include_response_coverage === true,
   );
 
 /** Group retained HAR request lines; format matches do not establish handler identity. */
