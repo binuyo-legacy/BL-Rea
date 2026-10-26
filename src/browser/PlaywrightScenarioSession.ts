@@ -5,6 +5,7 @@ import {
 import type { BrowserContext } from "playwright-core";
 
 import type { BrowserScenario } from "../domain/browserScenario.js";
+import { selectedCdpCommandTimeoutMs } from "../domain/browserDeadline.js";
 import type { BrowserScenarioAction } from "../domain/browserScenarioValues.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import { PLAYWRIGHT_BROWSER_SCENARIO_PROVIDER_IDENTITY } from "./providerIdentities.js";
@@ -227,7 +228,7 @@ export class PlaywrightScenarioSession implements BrowserScenarioSessionPort {
             waitUntil: "load",
             timeout: 0,
           }),
-        scenario.command_timeout_ms,
+        selectedCdpCommandTimeoutMs(scenario.command_timeout_ms),
         options.signal,
       );
       await withPlaywrightExecutionBoundary(

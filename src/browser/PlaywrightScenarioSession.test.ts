@@ -2,6 +2,7 @@ import {
   AnalysisCleanupLeaseGroup,
   AnalysisCleanupLease,
 } from "../artifacts/AnalysisCleanupLease.js";
+import { DEFAULT_CDP_COMMAND_TIMEOUT_MS } from "../domain/browserDeadline.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { PlaywrightBrowserScenarioProvider } from "./PlaywrightBrowserScenarioProvider.js";
@@ -1494,6 +1495,34 @@ it.each(["launch", "connect"] as const)(
         _tag: "AnalysisTimeoutError",
         operation: "capture_browser_scenario",
         timeoutMs: 250,
+      });
+      expect(cleanup.close).toHaveBeenCalledOnce();
+      expect(storage?.close).toHaveBeenCalledWith(true);
+      expect(page.goto).toHaveBeenCalledOnce();
+    } finally {
+      await cleanup.cleanupLease.release();
+      vi.useRealTimers();
+    }
+  },
+);
+
+it.each(["launch", "connect"] as const)(
+  "bounds never-settling initial navigation at the default deadline when command_timeout_ms is omitted (%s)",
+  async (mode) => {
+    vi.useFakeTimers();
+    const { cleanup, page, storage } = fixture();
+    const request = mode === "launch" ? scenario : connectedScenario("allow");
+    page.goto.mockImplementation(() => new Promise<never>(() => {}));
+    try {
+      const opening = PlaywrightScenarioSession.open(request, {}, {}).catch(
+        (cause: unknown) => cause,
+      );
+      await vi.advanceTimersByTimeAsync(DEFAULT_CDP_COMMAND_TIMEOUT_MS);
+      const failure = await opening;
+      expect(failure).toMatchObject({
+        _tag: "AnalysisTimeoutError",
+        operation: "capture_browser_scenario",
+        timeoutMs: DEFAULT_CDP_COMMAND_TIMEOUT_MS,
       });
       expect(cleanup.close).toHaveBeenCalledOnce();
       expect(storage?.close).toHaveBeenCalledWith(true);
