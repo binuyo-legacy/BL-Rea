@@ -36,6 +36,20 @@ import {
 /** Environment key selecting the caller's apktool launcher. */
 export const APKTOOL_COMMAND_ENV = "REA_APKTOOL_COMMAND";
 
+/**
+ * The OS errno behind a launcher failure. An absent launcher and a launcher the
+ * current user may not execute are different diagnoses, so both stay distinct
+ * here instead of collapsing into one "not found" answer.
+ */
+type ApktoolLauncherErrorCode = "ENOENT" | "EACCES" | "EPERM";
+
+const systemErrorCode = (cause: Error): ApktoolLauncherErrorCode | null => {
+  const code: unknown = Reflect.get(cause, "code");
+  return code === "ENOENT" || code === "EACCES" || code === "EPERM"
+    ? code
+    : null;
+};
+
 const VERSION_TIMEOUT_MS = 20_000;
 const VERSION_MAX_OUTPUT_BYTES = 64 * 1024;
 
@@ -520,11 +534,8 @@ const versionProbeFailure = (
         ...apktoolVersionProbeTimeoutGuidance(),
       },
     );
-  if (
-    cause instanceof Error &&
-    "code" in cause &&
-    (cause.code === "ENOENT" || cause.code === "EACCES")
-  )
+  const launcherError = cause instanceof Error ? systemErrorCode(cause) : null;
+  if (launcherError === "ENOENT")
     return new ApktoolConfigurationFailure(
       cause.code === "EACCES" ? "command_not_executable" : "command_missing",
       cause.code === "EACCES"
@@ -538,6 +549,18 @@ const versionProbeFailure = (
           cause.code === "EACCES"
             ? `Check file type and execute permission for ${APKTOOL_COMMAND_ENV} or select an executable apktool launcher`
             : `Set ${APKTOOL_COMMAND_ENV} to an absolute apktool launcher (the upstream wrapper or a java -jar script)`,
+      },
+      { cause },
+    );
+  if (launcherError === "EACCES" || launcherError === "EPERM")
+    return new ApktoolConfigurationFailure(
+      "command_unresolved",
+      `The selected apktool launcher could not be executed: ${selection.command}`,
+      {
+        selected_command: selection.command,
+        command_source: selection.commandSource,
+        filesystem_error: launcherError,
+        remediation: `Grant execute access to ${selection.command} for the current user, or set ${APKTOOL_COMMAND_ENV} to an apktool launcher this user can execute`,
       },
       { cause },
     );

@@ -686,6 +686,32 @@ it("reports a missing launcher as a capability gap with recovery", async () => {
   });
 });
 
+it("reports a launcher the caller may not execute as a permission failure", async () => {
+  const { command } = await writeApktoolStub(() => VERSION_BLOCK);
+  await chmod(command, 0o644);
+  const provider = providerOver(command);
+  const availability = await provider.inspectAvailability();
+  expect(availability).toMatchObject({
+    status: "unavailable",
+    code: "not_configured",
+    reason: expect.stringContaining("could not be executed") as unknown,
+    diagnostics: {
+      selected_command: command,
+      filesystem_error: "EACCES",
+    },
+  });
+  expect(availability.reason).not.toContain("was not found");
+  const projected = await refusedBy(provider, {
+    operation: "inspect_apktool_client",
+    input: {},
+  });
+  expect(projected).toMatchObject({ code: "capability_unavailable" });
+  expect(projected.details).toMatchObject({
+    provider_id: "apktool",
+    reason: expect.stringContaining("could not be executed") as unknown,
+  });
+});
+
 it("fails closed for unrecognized and unsupported Apktool versions", async () => {
   const invalidOutput = `unexpected Apktool output ${"x".repeat(700)}\n`;
   const unrecognized = await writeApktoolStub(
