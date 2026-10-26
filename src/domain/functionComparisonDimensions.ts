@@ -58,10 +58,10 @@ export const compareDimensions = (
     compareCfg(left, right, context),
   ].map((result) => {
     const limitations = [
-      ...facetLimitations(left, result.dimension).map(
+      ...functionFacetLimitations(left, result.dimension).map(
         (reason) => `Left: ${reason}`,
       ),
-      ...facetLimitations(right, result.dimension).map(
+      ...functionFacetLimitations(right, result.dimension).map(
         (reason) => `Right: ${reason}`,
       ),
     ];
@@ -78,7 +78,7 @@ export const compareDimensions = (
 };
 
 /** An empty undeclared facet is not evidence of observed absence. */
-const facetLimitations = (
+export const functionFacetLimitations = (
   snapshot: FunctionSnapshot,
   dimension: DimensionName,
 ): string[] => {
