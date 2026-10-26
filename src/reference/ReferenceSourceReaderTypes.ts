@@ -32,6 +32,7 @@ export type ReferenceSourceFailureCode =
   | "cancelled"
   | "changed"
   | "io"
+  | "limit"
   | "symlink"
   | "unsupported";
 
@@ -84,7 +85,7 @@ export interface ReferenceSourceRead {
 
 export interface ReferenceSourceReaderError {
   readonly tag: "reference-source-reader";
-  readonly code: "cancelled" | "invalid-root" | "io" | "unsupported";
+  readonly code: "cancelled" | "invalid-root" | "io" | "limit" | "unsupported";
   readonly message: string;
   readonly cleanup?: AnalysisCleanupObservation;
   /** Captured entries before failure; this does not establish complete tree coverage. */

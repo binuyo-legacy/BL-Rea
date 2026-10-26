@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect } from "vitest";
@@ -9,6 +9,7 @@ import {
   analysisErrorProjectionSchema,
 } from "../../../src/contracts/errorSchemas.js";
 import { cliTest } from "../../support/cli/cliFixture.js";
+import { REFERENCE_SOURCE_MAX_BYTES } from "../../../src/reference/ReferenceSourceLimits.js";
 
 const unsupportedHostOutput = expect.objectContaining({
   error: "Import failed",
@@ -20,6 +21,84 @@ const unsupportedHostOutput = expect.objectContaining({
 
 const permissionChecksUnavailable =
   process.platform === "win32" || process.getuid?.() === 0;
+
+cliTest.skipIf(process.platform === "win32")(
+  "classifies a sparse oversized source as a resource limit",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-reference-cli-limit-");
+    const path = join(root, "large.js");
+    await writeFile(path, "");
+    await truncate(path, REFERENCE_SOURCE_MAX_BYTES + 1);
+
+    const result = await cli.run({
+      arguments: ["import-reference-source", root, "--json"],
+      cwd: root,
+    });
+
+    expect(result.json).toMatchObject({
+      error: "Import failed",
+      code: "resource_constraint",
+      category: "resource_constraint",
+      details: {
+        diagnostics: {
+          reference_source_code: "limit",
+          partial: {
+            bytesRead: 0,
+            entries: [{ path: "large.js", code: "limit" }],
+          },
+        },
+      },
+    });
+    expect(result.exitCode).toBe(1);
+  },
+);
+
+cliTest.skipIf(process.platform === "win32")(
+  "keeps aggregate-limit partial inventory JSON-safe",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory(
+      "rea-reference-cli-total-limit-",
+    );
+    for (const name of ["a.js", "b.js"]) {
+      const path = join(root, name);
+      await writeFile(path, "");
+      await truncate(path, REFERENCE_SOURCE_MAX_BYTES / 2 + 1);
+    }
+
+    const result = await cli.run({
+      arguments: ["import-reference-source", root, "--json"],
+      cwd: root,
+    });
+
+    expect(result.json).toMatchObject({
+      error: "Import failed",
+      code: "resource_constraint",
+      category: "resource_constraint",
+      details: {
+        diagnostics: {
+          reference_source_code: "limit",
+          partial: {
+            bytesRead: REFERENCE_SOURCE_MAX_BYTES / 2 + 1,
+            entries: expect.arrayContaining([
+              expect.objectContaining({
+                status: "read",
+                kind: "file",
+                size: REFERENCE_SOURCE_MAX_BYTES / 2 + 1,
+              }),
+              expect.objectContaining({
+                status: "failed",
+                code: "limit",
+                size: REFERENCE_SOURCE_MAX_BYTES / 2 + 1,
+              }),
+            ]),
+          },
+        },
+      },
+    });
+    expect(result.stdout.length).toBeLessThan(10_000);
+    expect(result.exitCode).toBe(1);
+  },
+);
 
 describe("compiled Windows reference-source import", () => {
   for (const scenario of [

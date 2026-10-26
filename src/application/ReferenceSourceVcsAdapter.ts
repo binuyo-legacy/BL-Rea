@@ -8,6 +8,10 @@ import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import { readRegularFile, retryRegularFileCleanup } from "./RegularFileRead.js";
 import { referenceSourceResourceFailure } from "../reference/ReferenceSourceReaderErrors.js";
 import type { ReferenceSourceReaderError } from "../reference/ReferenceSourceReaderTypes.js";
+import {
+  REFERENCE_SOURCE_METADATA_MAX_BYTES,
+  ReferenceSourceMetadataLimitError,
+} from "../reference/ReferenceSourceLimits.js";
 
 export type ReferenceSourceVcsInfo =
   | {
@@ -60,7 +64,13 @@ const resolveSourceVcs = async (
   const cleanupFailures: ArtifactReaderFailure[] = [];
   const readMetadataBytes = async (path: string): Promise<Buffer> => {
     try {
-      return await readRegularFile(path, { signal });
+      return await readRegularFile(path, {
+        signal,
+        admit: (state) => {
+          if (state.size > REFERENCE_SOURCE_METADATA_MAX_BYTES)
+            throw new ReferenceSourceMetadataLimitError(path);
+        },
+      });
     } catch (cause: unknown) {
       if (signal?.aborted === true && cause === signal.reason) throw cause;
       if (!(cause instanceof RegularFileCleanupFailure)) throw cause;
