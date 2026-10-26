@@ -148,16 +148,24 @@ const addCookies = async (
       run.state.complete = false;
       continue;
     }
+    // CDP Cookie.partitionKeyOpaque means the partition exists but is not
+    // serializable. A missing partitionKey means unpartitioned, so hashing
+    // that absence would align an unresolved partition with a different cookie.
+    // https://chromedevtools.github.io/devtools-protocol/tot/Network/#type-Cookie
+    const partitionOpaque = cookie.partitionKeyOpaque === true;
+    if (partitionOpaque) run.state.complete = false;
     addFingerprint(run.state, {
       scope: "cookie",
-      identity: {
-        domain,
-        path,
-        name,
-        partition_key: cookie.partitionKey ?? null,
-      },
+      identity: partitionOpaque
+        ? { domain, path, name, partition_key: null, partition_opaque: true }
+        : {
+            domain,
+            path,
+            name,
+            partition_key: cookie.partitionKey ?? null,
+          },
       value,
-      complete: cookie.partitionKeyOpaque !== true,
+      complete: !partitionOpaque,
     });
   }
 };
