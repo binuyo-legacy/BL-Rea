@@ -1097,13 +1097,11 @@ describe("native DMG command failure diagnostics", () => {
           return Promise.resolve({ stdout: emptyInfoPlist, exitCode: 0 });
         if (arguments_[0] === "attach") {
           mountRoot = arguments_[arguments_.indexOf("-mountroot") + 1];
-          return Promise.reject(
-            Object.assign(new Error("could not spawn hdiutil"), {
-              code: "ENOENT",
-              syscall: "spawn /usr/bin/hdiutil",
-              errno: -2,
-            }),
-          );
+          // The capture owner's real spawn failure for a missing executable.
+          return execFileOutput("/nonexistent/rea-hdiutil", []).then(() => ({
+            stdout: "",
+            exitCode: 0,
+          }));
         }
         throw new Error(`unexpected command: ${arguments_[0] ?? ""}`);
       },
@@ -1209,12 +1207,10 @@ describe("native DMG command diagnostics", () => {
     await expect(
       createAttachedReader("/tmp/image.dmg", process.env, undefined, {
         run: () =>
-          Promise.reject(
-            Object.assign(new Error("could not launch hdiutil"), {
-              code: "ENOENT",
-              syscall: "spawn /usr/bin/hdiutil",
-            }),
-          ),
+          execFileOutput("/nonexistent/rea-hdiutil", []).then(() => ({
+            stdout: "",
+            exitCode: 0,
+          })),
       }),
     ).rejects.toMatchObject({
       reason: "unavailable",

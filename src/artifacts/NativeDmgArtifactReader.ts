@@ -666,19 +666,8 @@ export class NativeDmgArtifactReader implements ArtifactReader {
 const failureMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
 
-const processNotStarted = (cause: unknown): boolean => {
-  if (!(cause instanceof Error)) return false;
-  const syscall = Reflect.get(cause, "syscall");
-  const code = Reflect.get(cause, "code");
-  const errno = Reflect.get(cause, "errno");
-  return (
-    typeof syscall === "string" &&
-    syscall.startsWith("spawn ") &&
-    (typeof code === "string" ||
-      typeof code === "number" ||
-      typeof errno === "number")
-  );
-};
+const processNotStarted = (cause: unknown): boolean =>
+  execFileOutputFailure(cause)?.spawnFailed === true;
 
 const runChecked = async (
   host: NativeDmgHost,
@@ -794,15 +783,8 @@ const classifyCommandFailure = (
       processOutput(cause, "stderr"),
     );
   }
-  if (code === "ENOENT") {
-    const syscall = Reflect.get(cause, "syscall");
-    return {
-      reason:
-        typeof syscall === "string" && syscall.startsWith("spawn")
-          ? "unavailable"
-          : "io",
-    };
-  }
+  if (code === "ENOENT")
+    return { reason: processNotStarted(cause) ? "unavailable" : "io" };
   if (
     code === "EACCES" ||
     code === "EPERM" ||

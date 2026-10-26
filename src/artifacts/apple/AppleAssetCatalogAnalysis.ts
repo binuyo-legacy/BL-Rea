@@ -37,6 +37,7 @@ import {
   execFileOutput,
   execFileOutputFailure,
   execFileFailureCapturedOutput,
+  spawnCapacityExhausted,
 } from "../../process/ExecFileOutput.js";
 
 const ASSETUTIL = "/usr/bin/assetutil";
@@ -439,7 +440,22 @@ const assetUtilFailure = (
   };
   if (code === "ETIMEDOUT")
     return new AnalysisTimeoutError("inspect_asset_catalog", 60_000, options);
-  if (code === "ENOENT")
+  // The host, not assetutil, lacked capacity to start it.
+  if (spawnCapacityExhausted(output))
+    return new AnalysisResourceConstraintError(
+      "inspect_asset_catalog",
+      "capacity",
+      `The host could not start assetutil (${String(code)})`,
+      { spawn_error: String(code) },
+      {
+        ...options,
+        retryable: true,
+        remediationAction:
+          "The host ran out of process, memory or file-descriptor capacity. Close unused processes or files, or raise the process or open-file limit of the REA process, then retry.",
+      },
+    );
+  // assetutil never started, for example missing (ENOENT) or not permitted.
+  if (output?.spawnFailed === true)
     return new AnalysisCapabilityUnavailableError(
       "artifact",
       "inspect_asset_catalog",
