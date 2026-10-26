@@ -23,7 +23,7 @@ import {
   type WebSourceLocationInput,
   type WebSourceMapReport,
 } from "../domain/webSourceLocation.js";
-import { webSourceOffset } from "../domain/webSourcePosition.js";
+import { resolveWebSourcePosition } from "../domain/webSourcePosition.js";
 import type { ExecutionOptions } from "./AnalysisProvider.js";
 import {
   capturedWebManifestIdentity,
@@ -230,16 +230,32 @@ const verifyPairing = (
     return invalidOutput(
       "Artifact port changed the selected source-map byte identity or URL context.",
     );
-  const generatedOffset = webSourceOffset(
+  const resolved = resolveWebSourcePosition(
     data.source,
     input.generated_position,
   );
-  if (generatedOffset === undefined)
+  if (resolved === undefined)
     return invalid(
       ["generated_position"],
       "Selected generated position is outside the retained script text (one-based lines; zero-based UTF-16 columns).",
     );
-  return ok(generatedOffset);
+  if ("offset" in resolved) return ok(resolved.offset);
+  // Valid coordinates past the retained script are a caller selection fault.
+  const { line, column } = input.generated_position;
+  return err(
+    new AnalysisInputError(OPERATION, undefined, [
+      {
+        path: ["generated_position", resolved.field],
+        reason: "out_of_range",
+        minimum: resolved.field === "line" ? 1 : 0,
+        maximum: resolved.maximum,
+        message:
+          resolved.field === "line"
+            ? `No line ${String(line)}; the retained script ends at line ${String(resolved.maximum)} (one-based lines).`
+            : `No column ${String(column)} on line ${String(line)}; it ends at column ${String(resolved.maximum)} (zero-based UTF-16 columns).`,
+      },
+    ]),
+  );
 };
 
 const verifyReport = (

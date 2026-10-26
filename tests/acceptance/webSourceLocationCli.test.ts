@@ -104,6 +104,28 @@ cliTest(
     });
     expect(mcpResponse.isError, JSON.stringify(mcpResponse)).not.toBe(true);
     expect(mcpResponse.structuredContent).toEqual(response.json);
+    const pastColumn = await client.callTool({
+      name: "trace_web_source_location",
+      arguments: {
+        manifest_path: manifest,
+        script_index: 0,
+        source_map: { path: map, url: fixture.sourceMap.url },
+        generated_position: { line: 1, column: 10 },
+      },
+    });
+    expect(parseMcpToolError(pastColumn).error).toMatchObject({
+      code: "invalid_request",
+      details: {
+        issues: [
+          {
+            path: ["generated_position", "column"],
+            reason: "out_of_range",
+            minimum: 0,
+            maximum: fixture.source.length,
+          },
+        ],
+      },
+    });
     const invalid = await cli.run({
       arguments: [
         "trace-web-source-location",
@@ -121,7 +143,16 @@ cliTest(
     expect(invalid.exitCode).toBe(1);
     expect(invalid.json).toMatchObject({
       code: "invalid_request",
-      details: { issues: [{ path: ["generated_position"] }] },
+      details: {
+        issues: [
+          {
+            path: ["generated_position", "line"],
+            reason: "out_of_range",
+            minimum: 1,
+            maximum: 1,
+          },
+        ],
+      },
     });
   },
   // Allow cold CLI and MCP ownership preparation across the full parity sequence.
