@@ -8,6 +8,7 @@ import {
   parseEvidence,
   type Evidence,
 } from "../../domain/evidence.js";
+import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
 import {
   EvidenceIntegrityError,
   EvidenceReferenceError,
@@ -163,4 +164,46 @@ it("accepts display-only subject changes excluded from Evidence identity", async
     (evidenceId) => (evidenceId === parent.evidence_id ? parent : undefined),
   );
   expect(resolved).toEqual({ ok: true, value: parent });
+});
+
+it("rejects an inspect_analysis_view Evidence that is not an artifact summary", async () => {
+  const { summary } = await artifactSummary();
+  const notSummary = recreateSummary(summary, { kind: "unrelated" });
+  const resolved = resolveArtifactComparisonEvidence(notSummary, undefined);
+  expect(resolved.ok).toBe(false);
+  if (!resolved.ok) {
+    expect(resolved.error).toBeInstanceOf(AnalysisInputError);
+    expect(resolved.error).toMatchObject({
+      operation: "compare_artifacts",
+      issues: [
+        {
+          path: ["evidence"],
+          reason: "invalid_value",
+          message:
+            "Artifact comparison accepts only an artifact inventory summary from inspect_analysis_view.",
+        },
+      ],
+    });
+  }
+});
+
+it("reports an invalid view at the caller-selected field path", async () => {
+  const { summary } = await artifactSummary();
+  const notSummary = recreateSummary(summary, { kind: "unrelated" });
+  const resolved = resolveArtifactComparisonEvidence(notSummary, undefined, [
+    "left",
+  ]);
+  expect(resolved.ok).toBe(false);
+  if (!resolved.ok) {
+    expect(resolved.error).toBeInstanceOf(AnalysisInputError);
+    expect(resolved.error).toMatchObject({
+      operation: "compare_artifacts",
+      issues: [
+        {
+          path: ["left"],
+          reason: "invalid_value",
+        },
+      ],
+    });
+  }
 });

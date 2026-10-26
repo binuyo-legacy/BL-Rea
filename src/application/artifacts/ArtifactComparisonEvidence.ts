@@ -14,6 +14,7 @@ import { err, ok, type Result } from "../../domain/result.js";
 export const resolveArtifactComparisonEvidence = (
   evidence: Evidence,
   evidenceById: EvidenceLookup | undefined,
+  path: readonly (string | number)[] = ["evidence"],
 ): Result<Evidence, AnalysisError> => {
   if (evidence.operation !== "inspect_analysis_view") return ok(evidence);
 
@@ -24,7 +25,7 @@ export const resolveArtifactComparisonEvidence = (
     return err(
       new AnalysisInputError("compare_artifacts", undefined, [
         {
-          path: ["evidence"],
+          path,
           reason: "invalid_value",
           message:
             "Artifact comparison accepts only an artifact inventory summary from inspect_analysis_view.",
