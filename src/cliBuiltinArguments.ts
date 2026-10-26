@@ -10,6 +10,7 @@ export const OUTPUT_SWITCHES: ReadonlySet<string> = new Set([
   "--json",
   "--full-output",
   "--token-count",
+  "--timings",
 ]);
 
 /** Valueless flags Incur removes from every position before command parsing. */
@@ -26,6 +27,7 @@ export const INCUR_BUILTIN_FLAGS: ReadonlySet<string> = new Set([
   "--schema",
   "--json",
   "--token-count",
+  "--timings",
 ]);
 
 /** Command tokens and output-flag values as Incur's builtin pass assigns them. */
