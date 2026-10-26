@@ -19,6 +19,7 @@ import {
 
 // The launcher and compiled CLI drivers share this lightweight entrypoint.
 export { cliConfigurationError } from "./cliConfiguration.js";
+export { windowsMcpAddDelegation } from "./cli/windowsMcpAdd.js";
 
 const UNSUPPORTED_OUTPUT_COMBINATION_MESSAGE =
   "Token windows cannot preserve structured output. Remove --token-limit/--token-offset and use --filter-output or command pagination.";
