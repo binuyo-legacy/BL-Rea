@@ -492,6 +492,17 @@ export class NativeDmgArtifactReader implements ArtifactReader {
         this.#attachMayHaveMounted = false;
         this.#ownershipUncertainty = undefined;
       }
+      if (
+        cause instanceof NativeDmgCommandFailure &&
+        cause.reason === "unavailable" &&
+        cause.exitCode !== null &&
+        (await existingImagePathListed(this.path, baseline))
+      )
+        throw new ArtifactReaderFailure("unavailable", cause.message, {
+          cause,
+          userMessage:
+            "hdiutil refused a private read-only DMG attachment after listing an existing attachment of this image path. If it is still attached, ask its owner to release it when safe, then retry. REA does not borrow or detach existing attachments.",
+        });
       throw cause;
     }
   }
@@ -662,6 +673,32 @@ export class NativeDmgArtifactReader implements ArtifactReader {
     return false;
   }
 }
+
+/** A path match supports recovery advice, never attachment ownership or byte identity. */
+const existingImagePathListed = async (
+  path: string,
+  info: NativeDmgInfo,
+): Promise<boolean> => {
+  let target: string;
+  try {
+    target = await realpath(path);
+  } catch {
+    return false;
+  }
+  for (const image of info.images) {
+    if (
+      image["image-path"] === undefined ||
+      image["system-entities"].length === 0
+    )
+      continue;
+    try {
+      if ((await realpath(image["image-path"])) === target) return true;
+    } catch {
+      // An unresolved path does not identify this image; keep checking other entries.
+    }
+  }
+  return false;
+};
 
 const failureMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
