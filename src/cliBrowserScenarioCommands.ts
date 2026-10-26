@@ -101,11 +101,74 @@ export const registerBrowserScenarioCommands = (
         }),
       ),
   });
+  registerBrowserScenarioValidationCommand(cli, logger);
+};
+
+/**
+ * Register the validation-only scenario command. It shares the execution
+ * contract but stops before browser discovery, launch, attachment, or
+ * navigation, so it needs no environment and constructs no provider.
+ */
+const registerBrowserScenarioValidationCommand = (
+  cli: ReturnType<typeof Cli.create>,
+  logger: Logger,
+): void => {
+  cli.command(CLI_COMMANDS.validateBrowserScenario, {
+    description:
+      "Validate one browser scenario without launching or attaching to a browser",
+    args: z.object({
+      inputJson: z
+        .string()
+        .describe("Inline browser scenario JSON or JSON file path"),
+    }),
+    run: ({ args }) =>
+      withCommandCancellation((signal) =>
+        logCliCommand(
+          logger,
+          CLI_COMMANDS.validateBrowserScenario,
+          async () => {
+            const input = await parseCliJsonInput(
+              args.inputJson,
+              OPERATION,
+              signal,
+            );
+            if (!input.ok) return input.error;
+            // Share the execution contract exactly: the same refinement rejects
+            // duplicate or reserved step IDs, duplicate secret identities,
+            // undeclared secret references, and request-step violations, so a
+            // scenario that validates here is the scenario execution admits.
+            const scenario = browserScenarioSchema.safeParse(
+              resolveCliJsonPaths(input.value, [
+                ["browser", "executable_path"],
+              ]),
+            );
+            if (!scenario.success)
+              return cliError(
+                analysisInputErrorFromIssues(
+                  OPERATION,
+                  scenario.error.issues,
+                  input.value,
+                  { cause: scenario.error },
+                ),
+                "Browser scenario validation failed",
+              );
+            // Report the smallest sufficient answer: the accepted request shape.
+            // Secret values are never read here, so nothing about them can leak.
+            return {
+              valid: true,
+              actions: scenario.data.actions.length,
+              secrets: scenario.data.secrets.length,
+            };
+          },
+        ),
+      ),
+  });
 };
 
 const cliError = (
   error: Parameters<typeof projectAnalysisError>[0],
+  headline = "Browser scenario capture failed",
 ): JsonValue => ({
-  error: "Browser scenario capture failed",
+  error: headline,
   ...projectAnalysisError(error),
 });
