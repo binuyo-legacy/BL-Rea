@@ -1,8 +1,16 @@
 import { resolveElectronFuseTarget } from "./ElectronFusePath.js";
 import { RegularFileChangedError } from "../filesystem/RegularFile.js";
-import { mkdir, symlink, writeFile, truncate, rename } from "node:fs/promises";
+import {
+  mkdir,
+  open,
+  symlink,
+  writeFile,
+  truncate,
+  rename,
+  type FileHandle,
+} from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
 import {
@@ -271,6 +279,66 @@ describe("Electron fuse reader resource boundaries", () => {
           }),
         ],
       });
+  });
+});
+
+describe("Electron fuse file reads", () => {
+  it("completes short positional reads before interpreting the image", async () => {
+    const root = await createTestTempDirectory(
+      "rea-electron-fuses-short-read-",
+    );
+    const image = thinFuseImage(OBSIDIAN_FUSE_BYTES);
+    const path = join(root, "Electron Framework");
+    await writeFile(path, image.bytes);
+    const probe = await open(path, "r");
+    const prototype = Object.getPrototypeOf(probe) as {
+      read(
+        buffer: Buffer,
+        offset: number,
+        length: number,
+        position: number,
+      ): Promise<{ readonly bytesRead: number; readonly buffer: Buffer }>;
+    };
+    await probe.close();
+    const nativeRead = prototype.read;
+    const reads = vi
+      .spyOn(prototype, "read")
+      .mockImplementation(async function (
+        this: FileHandle,
+        buffer,
+        offset,
+        length,
+        position,
+      ) {
+        return nativeRead.call(
+          this,
+          buffer,
+          offset,
+          Math.min(length, 3),
+          position,
+        );
+      });
+    try {
+      const report = await readElectronFuseImage(path);
+      expect(report).toMatchObject({
+        format: "mach-o",
+        bytes: image.bytes.length,
+        slices: [
+          {
+            sentinel_count: 1,
+            sentinels: [
+              {
+                sentinel_offset: image.sentinelOffset,
+                complete: true,
+              },
+            ],
+          },
+        ],
+      });
+      expect(reads.mock.calls.length).toBeGreaterThan(3);
+    } finally {
+      reads.mockRestore();
+    }
   });
 });
 

@@ -196,9 +196,8 @@ const readerFor =
     if (length <= 0 || offset < 0 || offset >= size) return new Uint8Array();
     const bounded = Math.min(length, size - offset);
     const buffer = Buffer.alloc(bounded);
-    const read = await handle.read(buffer, 0, bounded, offset);
-    if (read.bytesRead !== bounded) throw new RegularFileChangedError(path);
-    return buffer.subarray(0, read.bytesRead);
+    await readIntoExact(handle, path, buffer, 0, bounded, offset, signal);
+    return buffer;
   };
 
 const identifyContainer = async (
@@ -317,8 +316,7 @@ const scanSlices = async (
   while (position < size) {
     assertArtifactReadActive(signal);
     const length = Math.min(chunkBytes, size - position);
-    const read = await handle.read(chunk, 0, length, position);
-    if (read.bytesRead !== length) throw new RegularFileChangedError(path);
+    await readIntoExact(handle, path, chunk, 0, length, position, signal);
     const piece = chunk.subarray(0, length);
     hash.update(piece);
     absorbChunk(states, piece, position);
@@ -455,11 +453,32 @@ const readExact = async (
   length: number,
   signal: AbortSignal | undefined,
 ): Promise<Buffer> => {
-  assertArtifactReadActive(signal);
   const buffer = Buffer.alloc(length);
-  const read = await handle.read(buffer, 0, length, offset);
-  if (read.bytesRead !== length) throw new RegularFileChangedError(path);
+  await readIntoExact(handle, path, buffer, 0, length, offset, signal);
   return buffer;
+};
+
+const readIntoExact = async (
+  handle: FileHandle,
+  path: string,
+  buffer: Buffer,
+  offset: number,
+  length: number,
+  position: number,
+  signal: AbortSignal | undefined,
+): Promise<void> => {
+  let completed = 0;
+  while (completed < length) {
+    assertArtifactReadActive(signal);
+    const read = await handle.read(
+      buffer,
+      offset + completed,
+      length - completed,
+      position + completed,
+    );
+    if (read.bytesRead === 0) throw new RegularFileChangedError(path);
+    completed += read.bytesRead;
+  }
 };
 
 const isElf = (head: Uint8Array): boolean =>
