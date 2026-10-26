@@ -2,6 +2,10 @@ import * as t from "@babel/types";
 import { runtimeFunctionParameters } from "./javascriptAstValues.js";
 import { JavaScriptSymbolicBindings } from "./javascriptSymbolicBindings.js";
 import {
+  referencesElectronModule,
+  referencesUnresolvedModule,
+} from "./javascriptElectronMemberWrites.js";
+import {
   symbolicVariants,
   symbolicTruth,
   symbolicUnknown,
@@ -238,14 +242,23 @@ export function* collectElectronWrappedCallPathsSteps(
   source: string,
   accumulator: JavaScriptAnalysisAccumulator,
   identity: JavaScriptElectronIdentity,
+  indexMemberMutationFacts: () => void,
 ): Generator<void, readonly ElectronCallPath[]> {
   // Bounds repeated interprocedural expansion independently of bundle bytes.
   // Exhaustion is reported as unknown coverage, never as a negative finding.
   let remainingVisits = 1_000_000;
+  // Unknowns met on the walk are attributed to the file only where the walk
+  // could have reached Electron; see the end of this function.
+  let unknownFindings = 0;
   const prefixes = new ElectronCallPathBlockPrefixes(
     () => --remainingVisits >= 0,
   );
-  const resolver = new JavaScriptSymbolicBindings(state, program, identity);
+  const resolver = new JavaScriptSymbolicBindings(
+    state,
+    program,
+    identity,
+    indexMemberMutationFacts,
+  );
   const paths: ElectronCallPath[] = [];
   const seen = new Set<string>();
   const unconditionalRegistrations = new Set<string>();
@@ -318,7 +331,7 @@ export function* collectElectronWrappedCallPathsSteps(
     value: SymbolicValue,
   ): PathContext | null => {
     if (value.conditionUnresolved) {
-      accumulator.unknownFindings += 1;
+      unknownFindings += 1;
       return null;
     }
     return (
@@ -604,7 +617,7 @@ export function* collectElectronWrappedCallPathsSteps(
   }> {
     if (active.has(value)) return;
     if (active.size >= 128) {
-      accumulator.unknownFindings += 1;
+      unknownFindings += 1;
       accumulator.electronCallPathLimitReached = true;
       return;
     }
@@ -694,7 +707,7 @@ export function* collectElectronWrappedCallPathsSteps(
     const body = resolver.callBody(fn);
     if (body === undefined || context.active.has(fn.node)) return;
     if (fn.conditionUnresolved === true) {
-      accumulator.unknownFindings += 1;
+      unknownFindings += 1;
       return;
     }
     const name =
@@ -728,7 +741,7 @@ export function* collectElectronWrappedCallPathsSteps(
   ): void => {
     const first = args[0];
     if (first?.kind !== "literal" || typeof first.value !== "string") {
-      accumulator.unknownFindings += 1;
+      unknownFindings += 1;
       return;
     }
     const channelContext = metadataContext(context, first);
@@ -884,14 +897,14 @@ export function* collectElectronWrappedCallPathsSteps(
           perInvocationHandler ? undefined : { calls: context.calls, slot },
         );
         if (descriptor.mode !== "send" && descriptor.mode !== "invoke" && !fn)
-          accumulator.unknownFindings += 1;
+          unknownFindings += 1;
       }
     } else if (
       findingGuarded &&
       (registrationKey === undefined ||
         !unconditionalRegistrations.has(registrationKey))
     ) {
-      accumulator.unknownFindings += 1;
+      unknownFindings += 1;
       // A guarded registration is a path candidate even when its callback has
       // no observable body. Keep its predicate instead of promoting it to an
       // unconditional IPC fact or dropping the registration entirely.
@@ -966,9 +979,9 @@ export function* collectElectronWrappedCallPathsSteps(
       worldValue === null
         ? null
         : electronStaticSymbolicValue(worldValue, worldNode);
-    if (worldId?.status === "dynamic") accumulator.unknownFindings += 1;
+    if (worldId?.status === "dynamic") unknownFindings += 1;
     if (key?.kind !== "literal" || typeof key.value !== "string" || !object) {
-      accumulator.unknownFindings += 1;
+      unknownFindings += 1;
       return unresolved();
     }
     const keyContext = metadataContext(worldContext, key);
@@ -986,7 +999,7 @@ export function* collectElectronWrappedCallPathsSteps(
       guardedObject ||
       guardedDispatch;
     if (guarded) {
-      accumulator.unknownFindings += 1;
+      unknownFindings += 1;
       unresolved();
     } else if (site !== undefined) {
       // Each invocation binds its own key and object, so one helper's exposure
@@ -1024,7 +1037,7 @@ export function* collectElectronWrappedCallPathsSteps(
           prior.value.world_id?.status === "literal" &&
           worldId?.status === "literal"
         )
-          accumulator.unknownFindings += 1;
+          unknownFindings += 1;
         prior.value = merged;
       }
     }
@@ -1298,9 +1311,25 @@ export function* collectElectronWrappedCallPathsSteps(
   }
   recordBridgeExposures();
   if (remainingVisits < 0 || resolver.truncated) {
-    accumulator.unknownFindings += 1;
+    unknownFindings += 1;
     accumulator.electronCallPathLimitReached = true;
   }
-  if (resolver.unresolved) accumulator.unknownFindings += 1;
+  if (resolver.unresolved) unknownFindings += 1;
+  // Every path starts at an Electron exposure or IPC registration, and the
+  // resolver reaches an Electron value only through a require or import of
+  // the Electron module. Where none of that happened, no read gave up before
+  // an initializer that could supply a loader, and no budget ran out, the
+  // walk could not have hidden a path, so its unresolved reads describe no
+  // fact this analysis could have found.
+  if (
+    identity.bindings.size > 0 ||
+    resolver.reachedElectron ||
+    resolver.unresolvedRequire ||
+    resolver.unresolvedLoader ||
+    accumulator.electronCallPathLimitReached === true ||
+    referencesElectronModule(accumulator.references) ||
+    referencesUnresolvedModule(accumulator.references)
+  )
+    accumulator.unknownFindings += unknownFindings;
   return paths;
 }
