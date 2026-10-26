@@ -96,6 +96,8 @@ const observationFailureMessage = (
     return `${operation} could not reach the selected loopback debugging endpoint. Verify that the target process is running with debugging enabled and that the endpoint's port matches it, then retry.`;
   if (reason === "target_not_found")
     return `${operation} could not find the selected target at the debugging endpoint. Refresh target discovery for that endpoint and retry with a returned target ID.`;
+  if (reason === "target_changed")
+    return `${operation} could not complete because the selected target changed during observation. Wait for the target to settle. If needed, refresh target discovery on the same debugging endpoint, verify the selected target, and retry the observation.`;
   if (reason === "target_session_detached")
     return `${operation} lost its debugging session while the target may still exist. Refresh target discovery and attach to the selected target again.`;
   if (reason === "target_changed")

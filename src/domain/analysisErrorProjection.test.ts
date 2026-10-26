@@ -522,6 +522,53 @@ it("retains native partial observations and cleanup uncertainty on provider fail
 });
 
 describe("analysis error projection: browser provider failures", () => {
+  it.each([
+    "inspect_web_page",
+    "capture_web_screenshot",
+    "observe_javascript_runtime",
+  ] as const)("explains target changes during %s", (operation) => {
+    const projected = projectAnalysisError(
+      new BrowserObservationError(operation, "target_changed"),
+    );
+
+    expect(projected).toMatchObject({
+      code: "target_unavailable",
+      category: "unavailable",
+      retryable: false,
+      details: { operation, reason: "target_changed" },
+    });
+    expect(projected.message).toContain("selected target changed");
+    expect(projected.message).toContain("Wait for the target to settle");
+    expect(projected.remediation.action).toBe(projected.message);
+    expect(projected.remediation.action).toContain("same debugging endpoint");
+    expect(projected.message).not.toContain("rea doctor");
+    expect(analysisErrorProjectionSchema.parse(projected)).toEqual(projected);
+  });
+
+  it.each([
+    { detail: "The selected document was replaced." },
+    { remediationAction: "Select the replacement document before retrying." },
+    {
+      detail: "The selected document was replaced.",
+      remediationAction: "Select the replacement document before retrying.",
+    },
+  ])("preserves target-change producer guidance: %j", (options) => {
+    const projected = projectAnalysisError(
+      new BrowserObservationError(
+        "inspect_web_page",
+        "target_changed",
+        options,
+      ),
+    );
+
+    if (options.detail !== undefined)
+      expect(projected.message).toBe(options.detail);
+    else expect(projected.message).toContain("selected target changed");
+    expect(projected.remediation.action).toBe(
+      options.remediationAction ?? projected.message,
+    );
+  });
+
   it("explains the service-worker policy refusal and names its recovery", () => {
     const projected = projectAnalysisError(
       new BrowserObservationError(
