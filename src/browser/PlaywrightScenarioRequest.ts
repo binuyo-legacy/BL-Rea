@@ -1,9 +1,13 @@
-import type { Page, Route } from "playwright-core";
+import type { Page, Request, Route } from "playwright-core";
 
 import {
   HEADER_FIELD_VALUE,
+  SAVED_PLACEHOLDER,
   type BrowserScenarioAction,
+  type BrowserScenarioCredentialPart,
   type BrowserScenarioRequestHeader,
+  type BrowserScenarioSaveEntry,
+  type BrowserScenarioSaveResponse,
 } from "../domain/browserScenarioValues.js";
 import type { BrowserScenarioSecrets } from "./BrowserScenarioSecrets.js";
 
@@ -11,7 +15,7 @@ type RequestAction = Extract<BrowserScenarioAction, { action: "request" }>;
 
 /** What the page's fetch returned; a redirect is not followed, so its status is unknown. */
 type PageResponse =
-  | { readonly status: number }
+  | { readonly status: number; readonly body?: string }
   | { readonly redirected: true }
   | { readonly left: string }
   | { readonly error: string };
@@ -31,6 +35,15 @@ const originOf = (url: string): string | undefined => {
 
 /** The string or number at a JSON pointer, as text. */
 const pointerText = (value: unknown, pointer: string): string | undefined => {
+  const found = pointerValue(value, pointer);
+  return found === undefined ? undefined : String(found);
+};
+
+/** The string or number at a JSON pointer. */
+const pointerValue = (
+  value: unknown,
+  pointer: string,
+): string | number | undefined => {
   let current = value;
   if (pointer !== "")
     for (const token of pointer.slice(1).split("/")) {
@@ -46,24 +59,27 @@ const pointerText = (value: unknown, pointer: string): string | undefined => {
       else return undefined;
     }
   return typeof current === "string" || typeof current === "number"
-    ? String(current)
+    ? current
     : undefined;
 };
 
-/** Resolve one header value; values read from the page are redacted from later records. */
-const headerValue = async (
-  step: {
-    readonly page: Page;
-    readonly url: URL;
-    readonly stepId: string;
-    readonly secrets: BrowserScenarioSecrets;
-  },
-  header: BrowserScenarioRequestHeader,
+interface PageValueStep {
+  readonly page: Page;
+  readonly url: URL;
+  readonly stepId: string;
+  readonly secrets: BrowserScenarioSecrets;
+}
+
+/** Read a value from the page, a cookie or a local storage entry, and redact it from later records under a label. */
+const readPageValue = async (
+  step: PageValueStep,
+  value: Extract<
+    BrowserScenarioCredentialPart,
+    { source: "cookie" | "local_storage" }
+  >,
+  label: string,
 ): Promise<string> => {
   const { page, url, stepId, secrets } = step;
-  const { value } = header;
-  if (value.source === "literal" || value.source === "secret")
-    return secrets.value(value);
   let read: string | undefined;
   if (value.source === "cookie") {
     const cookies = await page.context().cookies(url.href);
@@ -113,8 +129,47 @@ const headerValue = async (
         );
     }
   }
-  secrets.admitPageValue(`${stepId}.${header.name}`, read);
+  secrets.admitPageValue(label, read);
   return read;
+};
+
+/** One part of Basic credentials: a literal, secret or saved value, or a value read from the page. */
+const credentialPart = (
+  step: PageValueStep,
+  part: BrowserScenarioCredentialPart,
+  label: string,
+): Promise<string> | string =>
+  part.source === "cookie" || part.source === "local_storage"
+    ? readPageValue(step, part, label)
+    : step.secrets.value(part);
+
+/** Resolve one header value; values read from the page, and credentials built from them, are redacted from later records. */
+const headerValue = async (
+  step: PageValueStep,
+  header: BrowserScenarioRequestHeader,
+): Promise<string> => {
+  const { stepId, secrets } = step;
+  const { value } = header;
+  const label = `${stepId}.${header.name}`;
+  if (
+    value.source === "literal" ||
+    value.source === "secret" ||
+    value.source === "saved"
+  )
+    return secrets.value(value);
+  if (value.source === "basic_credentials") {
+    const [username, password] = value.parts;
+    const user = await credentialPart(step, username!, `${label}.username`);
+    if (user.includes(":"))
+      throw new ScenarioRequestError(
+        `Request step ${stepId} has a Basic username with a colon, which the server would read as the end of the username.`,
+      );
+    const pass = await credentialPart(step, password!, `${label}.password`);
+    const encoded = Buffer.from(`${user}:${pass}`).toString("base64");
+    secrets.admitCredential(label, encoded);
+    return encoded;
+  }
+  return readPageValue(step, value, label);
 };
 
 /** Append declared query entries after any literal query the path carries, leaving that query as written. */
@@ -148,7 +203,15 @@ interface PageRequest {
   readonly headers: [string, string][];
   readonly body: string | undefined;
   readonly deadline: number | undefined;
+  /** Return the response text up to this many characters, for a step that saves values from it. */
+  readonly readLimit: number | undefined;
 }
+
+/** The largest response text a request step saves values from. */
+const MAX_SAVED_RESPONSE_CHARACTERS = 4_000_000;
+
+/** The most UTF-8 bytes text within that limit can take: three per UTF-16 code unit. */
+const MAX_SAVED_RESPONSE_BYTES = 3 * MAX_SAVED_RESPONSE_CHARACTERS;
 
 /** Send the request with the page's own fetch, from the page's main world, and read the whole answer. */
 const sendFromPage = (
@@ -191,6 +254,28 @@ const sendFromPage = (
         signal: controller.signal,
         ...(request.body === undefined ? {} : { body: request.body }),
       });
+      if (answer.type === "opaqueredirect") return { redirected: true };
+      if (request.readLimit !== undefined) {
+        // Keep the text only up to the limit, so a large answer is never held whole.
+        const reader = answer.body?.getReader();
+        if (reader === undefined) return { status: answer.status, body: "" };
+        const decoder = new TextDecoder();
+        let text = "";
+        try {
+          for (;;) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            text += decoder.decode(chunk.value, { stream: true });
+            if (text.length > request.readLimit) {
+              await reader.cancel();
+              return { status: answer.status };
+            }
+          }
+        } finally {
+          reader.releaseLock();
+        }
+        return { status: answer.status, body: text + decoder.decode() };
+      }
       const reader = answer.body?.getReader();
       if (reader !== undefined)
         try {
@@ -200,9 +285,7 @@ const sendFromPage = (
         } finally {
           reader.releaseLock();
         }
-      return answer.type === "opaqueredirect"
-        ? { redirected: true }
-        : { status: answer.status };
+      return { status: answer.status };
     } catch (cause: unknown) {
       return {
         error: cause instanceof Error ? cause.message : String(cause),
@@ -234,7 +317,7 @@ export const performScenarioRequest = async (input: {
     throw new ScenarioRequestError(
       `Request step ${action.step_id} runs from a page on the start origin ${startOrigin}; navigate back to it with a goto step first.`,
     );
-  const url = new URL(action.path, startOrigin);
+  const url = new URL(withSavedPlaceholders(action.path, secrets), startOrigin);
   if (url.origin !== startOrigin)
     throw new ScenarioRequestError(
       `Request step ${action.step_id} must stay on the start origin ${startOrigin}.`,
@@ -264,13 +347,17 @@ export const performScenarioRequest = async (input: {
     throw new ScenarioRequestError(
       `Request step ${action.step_id} ran out of time before its request was sent.`,
     );
+  const json =
+    action.json === undefined ? undefined : withSavedJson(action.json, secrets);
   const request = {
     url: target,
     origin: startOrigin,
     method: action.method,
     headers,
-    body: action.json === undefined ? undefined : JSON.stringify(action.json),
+    body: json === undefined ? undefined : JSON.stringify(json),
     deadline,
+    readLimit:
+      action.save.length > 0 ? MAX_SAVED_RESPONSE_CHARACTERS : undefined,
   };
   // The browser can queue evaluate behind a busy page. Keep a host-side gate
   // until that evaluation settles, including after the step boundary stops
@@ -320,4 +407,243 @@ export const performScenarioRequest = async (input: {
     throw new ScenarioRequestError(
       `Request step ${action.step_id} answered ${String(response.status)}; expected ${action.expected_status.join(" or ")}.`,
     );
+  if (action.save.length > 0)
+    saveValues(action.step_id, response.body, action.save, secrets);
+};
+
+/** A path or URL with its `placeholder`s filled, each value percent-encoded; a request path's are spelled as written. A value a URL path would drop as a dot segment fails the step. */
+export const withSavedPlaceholders = (
+  text: string,
+  secrets: BrowserScenarioSecrets,
+  placeholder: RegExp = SAVED_PLACEHOLDER,
+): string => {
+  const pathEnd = text.search(/[?#]/u);
+  return text.replace(
+    placeholder,
+    (match: string, name: string, offset: number) => {
+      const encoded = encodeURIComponent(String(secrets.savedValue(name)));
+      const end = offset + match.length;
+      const segment =
+        (pathEnd < 0 || end <= pathEnd) &&
+        (offset === 0 || text[offset - 1] === "/") &&
+        (end === text.length || "/?#".includes(text[end]!));
+      if (segment && (encoded === "." || encoded === ".."))
+        throw new Error(
+          `Saved value ${name} is a dot segment, which a URL path drops, so the step cannot send it.`,
+        );
+      return encoded;
+    },
+  );
+};
+
+/** Whether a request a UI step triggered is the one its `save_response` names: method, start origin, and path with `{*}` matching one segment. */
+/** A `save_response` path's segments as a browser spells a URL path, percent-encoded as its URL parser would, `{*}` kept. */
+const pathPattern = (path: string): readonly string[] =>
+  path
+    .split("?")[0]!
+    .split("/")
+    .map((segment) =>
+      segment === "{*}"
+        ? segment
+        : new URL(`http://path.invalid/${segment}`).pathname.slice(1),
+    );
+
+const namesResponse = (
+  spec: BrowserScenarioSaveResponse,
+  pattern: readonly string[],
+  startOrigin: string,
+  request: { readonly method: string; readonly url: string },
+): boolean => {
+  if (request.method !== spec.method) return false;
+  const url = URL.parse(request.url);
+  if (url === null || url.origin !== startOrigin) return false;
+  const segments = url.pathname.split("/");
+  return (
+    segments.length === pattern.length &&
+    pattern.every((part, index) => part === "{*}" || part === segments[index])
+  );
+};
+
+/** Settle as the work does, or fail the step once its deadline passes or it is cancelled, so late work saves nothing. */
+const beforeStepEnds = <T>(
+  work: Promise<T>,
+  stepId: string,
+  deadline: number | undefined,
+  signal: AbortSignal | undefined,
+): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const settle = (): void => {
+      if (timer !== undefined) clearTimeout(timer);
+      signal?.removeEventListener("abort", end);
+    };
+    const end = (): void => {
+      settle();
+      reject(
+        new ScenarioRequestError(
+          `Step ${stepId} ended before its saved response was read, so nothing was saved.`,
+        ),
+      );
+    };
+    work.catch(() => undefined);
+    const remaining =
+      deadline === undefined ? undefined : deadline - Date.now();
+    if (
+      signal?.aborted === true ||
+      (remaining !== undefined && remaining <= 0)
+    ) {
+      end();
+      return;
+    }
+    if (remaining !== undefined) timer = setTimeout(end, remaining);
+    signal?.addEventListener("abort", end, { once: true });
+    work.then(
+      (value) => {
+        settle();
+        resolve(value);
+      },
+      (cause: unknown) => {
+        settle();
+        reject(cause);
+      },
+    );
+  });
+
+/** A UI step's wait for the response its `save_response` names: `saved` waits and saves, `stop` stops watching requests. */
+export interface SavedResponseWait {
+  readonly saved: () => Promise<void>;
+  readonly stop: () => void;
+}
+
+/**
+ * Start waiting, before a UI step acts, for the response its `save_response` names to a request the step starts; one
+ * already running when the step began, such as an earlier autosave, cannot answer it. The step fails unless a 2xx JSON
+ * response arrives before its timeout, or the page's default timeout when it sets none.
+ */
+export const awaitSavedResponse = (
+  page: Page,
+  step: {
+    readonly stepId: string;
+    readonly spec: BrowserScenarioSaveResponse;
+    readonly startOrigin: string;
+    readonly timeout: number | undefined;
+    readonly secrets: BrowserScenarioSecrets;
+    readonly signal?: AbortSignal | undefined;
+  },
+): SavedResponseWait => {
+  const { stepId, spec, startOrigin, timeout, secrets, signal } = step;
+  const deadline = timeout === undefined ? undefined : Date.now() + timeout;
+  const pattern = pathPattern(spec.path);
+  const started = new Set<Request>();
+  const watch = (request: Request): void => {
+    if (
+      namesResponse(spec, pattern, startOrigin, {
+        method: request.method(),
+        url: request.url(),
+      })
+    )
+      started.add(request);
+  };
+  page.on("request", watch);
+  const waiting = page.waitForResponse(
+    (response) => started.has(response.request()),
+    timeout === undefined ? {} : { timeout },
+  );
+  // The step may fail before it waits; the rejection is reported by the wait, or not at all.
+  waiting.catch(() => undefined);
+  const saved = async (): Promise<void> => {
+    let response: Awaited<typeof waiting>;
+    try {
+      response = await beforeStepEnds(waiting, stepId, deadline, signal);
+    } catch {
+      throw new ScenarioRequestError(
+        `Step ${stepId}: no ${spec.method} ${spec.path} response arrived before the step's timeout, so nothing was saved.`,
+      );
+    }
+    if (response.status() < 200 || response.status() > 299)
+      throw new ScenarioRequestError(
+        `Step ${stepId}: the ${spec.method} ${spec.path} response answered ${String(response.status())}; values are saved only from a 2xx response.`,
+      );
+    // Playwright reads a body whole, so the size the browser received decides before it is read; its text is then held to the character limit.
+    const { responseBodySize } = await beforeStepEnds(
+      response.request().sizes(),
+      stepId,
+      deadline,
+      signal,
+    );
+    if (responseBodySize > MAX_SAVED_RESPONSE_BYTES)
+      throw new ScenarioRequestError(
+        `Step ${stepId}: the response is too large to save values from.`,
+      );
+    const body = await beforeStepEnds(
+      response.text(),
+      stepId,
+      deadline,
+      signal,
+    );
+    saveValues(stepId, body, spec.save, secrets);
+  };
+  return { saved, stop: () => page.off("request", watch) };
+};
+
+/**
+ * The step's JSON body with its `{saved:name}` placeholders filled: a string that is only a placeholder becomes the
+ * saved value, keeping its JSON type, and a placeholder inside a longer string is filled as text.
+ */
+const withSavedJson = (
+  value: unknown,
+  secrets: BrowserScenarioSecrets,
+): unknown => {
+  if (typeof value === "string") {
+    const [whole] = [...value.matchAll(SAVED_PLACEHOLDER)];
+    if (whole !== undefined && whole[0] === value)
+      return secrets.savedValue(whole[1]!);
+    return value.replace(SAVED_PLACEHOLDER, (_placeholder, name: string) =>
+      String(secrets.savedValue(name)),
+    );
+  }
+  if (Array.isArray(value))
+    return value.map((item) => withSavedJson(item, secrets));
+  if (value !== null && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        withSavedJson(item, secrets),
+      ]),
+    );
+  return value;
+};
+
+/** Save the values a step names from a JSON response, for later steps. */
+const saveValues = (
+  stepId: string,
+  body: string | undefined,
+  entries: readonly BrowserScenarioSaveEntry[],
+  secrets: BrowserScenarioSecrets,
+): void => {
+  if (body === undefined || body.length > MAX_SAVED_RESPONSE_CHARACTERS)
+    throw new ScenarioRequestError(
+      `Step ${stepId}: the response is too large to save values from.`,
+    );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new ScenarioRequestError(
+      `Step ${stepId}: the response is not JSON, so no value can be saved from it.`,
+    );
+  }
+  for (const { name, json_pointer, secret } of entries) {
+    const value = pointerValue(parsed, json_pointer);
+    if (value === undefined)
+      throw new ScenarioRequestError(
+        `Step ${stepId}: the response has no string or number at ${json_pointer} to save as ${name}.`,
+      );
+    // JSON parsing rounds an integer past 2^53, so a later step would name another object.
+    if (Number.isInteger(value) && !Number.isSafeInteger(value))
+      throw new ScenarioRequestError(
+        `Step ${stepId}: the number at ${json_pointer} is too large to keep exactly, so ${name} cannot be saved from it.`,
+      );
+    secrets.save(`${stepId}.${name}`, name, value, secret);
+  }
 };

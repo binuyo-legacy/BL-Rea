@@ -181,7 +181,10 @@ export const contradictsEarlierCalls = (
       return (
         rule.rule === "slug" &&
         (typeof from === "string"
-          ? !sameObserved(observation, observedValue(slugOf(from)))
+          ? !sameObserved(
+              observation,
+              observedValue(slugOf(from, rule.ampersand)),
+            )
           : !kept.includes(rule.field))
       );
     });

@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import type { BrowserScenario } from "../domain/browserScenario.js";
 import type {
   BrowserScenarioUrl,
+  BrowserScenarioRequestValue,
   BrowserScenarioValue,
 } from "../domain/browserScenarioValues.js";
 import {
@@ -271,10 +272,19 @@ export class BrowserScenarioSecrets {
    * {@link MIN_REDACTED_PAGE_VALUE_LENGTH} is not redacted.
    */
   admitPageValue(label: string, value: string): void {
+    this.admit(label, value, MIN_REDACTED_PAGE_VALUE_LENGTH);
+  }
+
+  /** Redact a credential a step built or a value it saved as secret from everything recorded after it, whatever its length, as a declared secret is. */
+  admitCredential(label: string, value: string): void {
+    this.admit(label, value, 1);
+  }
+
+  private admit(label: string, value: string, shortest: number): void {
     // fetch sends a header value without surrounding spaces and tabs, so that is the spelling records hold.
     const sent = value.replace(/^[\t ]+|[\t ]+$/gu, "");
-    if (sent !== value) this.admitPageValue(label, sent);
-    if (value.length < MIN_REDACTED_PAGE_VALUE_LENGTH) return;
+    if (sent !== value) this.admit(label, sent, shortest);
+    if (value.length < shortest) return;
     for (const held of this.values.values()) if (held === value) return;
     let id = `page:${label}`;
     for (let suffix = 2; this.values.has(id); suffix += 1)
@@ -318,8 +328,30 @@ export class BrowserScenarioSecrets {
     return ok(new BrowserScenarioSecrets(values));
   }
 
-  value(source: BrowserScenarioValue): string {
+  /** Values steps saved from JSON responses, by name, as strings or numbers. */
+  private readonly saved = new Map<string, string | number>();
+
+  /** Keep a value a step saved from a JSON response; a secret one is redacted from everything recorded after it. */
+  save(
+    label: string,
+    name: string,
+    value: string | number,
+    secret: boolean,
+  ): void {
+    this.saved.set(name, value);
+    if (secret) this.admitCredential(label, String(value));
+  }
+
+  /** A saved value with the JSON type it was saved with. */
+  savedValue(name: string): string | number {
+    const value = this.saved.get(name);
+    if (value === undefined) throw new Error(`No earlier step saved ${name}`);
+    return value;
+  }
+
+  value(source: BrowserScenarioValue | BrowserScenarioRequestValue): string {
     if (source.source === "literal") return source.value;
+    if (source.source === "saved") return String(this.savedValue(source.name));
     const value = this.values.get(source.secret_id);
     if (value === undefined)
       throw new Error("Validated browser secret was not resolved");
