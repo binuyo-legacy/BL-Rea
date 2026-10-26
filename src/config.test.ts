@@ -316,6 +316,8 @@ describe("configuration failure diagnostics", () => {
     "1.5",
     "1e3",
     "0x100",
+    "010",
+    " 100",
     "2147483648",
     "9007199254740991",
   ])(

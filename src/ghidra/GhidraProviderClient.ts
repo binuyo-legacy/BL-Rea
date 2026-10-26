@@ -1087,9 +1087,19 @@ const projectPrimarySessionError = (
       failure.message === GHIDRA_STARTUP_DEADLINE_ELAPSED
         ? ghidraStartupTimeoutGuidance(timeoutMs)
         : undefined;
+    const targetBytes = admittedTargetBytes(failure);
     return new AnalysisTimeoutError(operation, timeoutMs, {
       ...context,
       ...guidance,
+      ...(guidance === undefined
+        ? {}
+        : {
+            envName: "REA_GHIDRA_STARTUP_TIMEOUT_MS",
+            ...(failure.elapsedMs === undefined
+              ? {}
+              : { elapsedMs: failure.elapsedMs }),
+            ...(targetBytes === undefined ? {} : { targetBytes }),
+          }),
       ...(uncertainty === undefined
         ? {}
         : {
@@ -1304,6 +1314,26 @@ const ghidraStartupTimeoutGuidance = (timeoutMs: number) => ({
   userMessage: `Ghidra did not finish importing and analyzing the target within its configured ${String(timeoutMs)} ms startup deadline (REA_GHIDRA_STARTUP_TIMEOUT_MS).`,
   remediationAction: `Large binaries can need longer: use update_analysis_settings with setting ghidra.startup_timeout_ms and action set above ${String(timeoutMs)}, or set REA_GHIDRA_STARTUP_TIMEOUT_MS in the launch environment for future REA processes; REA_GHIDRA_DISABLED_ANALYZERS can skip selected expensive analyzers with reduced coverage. Export useful Evidence and resolve any retained cleanup before starting a new provider attempt. Runtime updates apply to the next startup attempt without restarting REA. Reopening repeats import from scratch. The MCP client's tool-call deadline must also allow startup and the query.`,
 });
+
+/** Recover the admitted target size from a failure's retained win32 admission. */
+const admittedTargetBytes = (
+  failure: GhidraSessionError,
+): number | undefined => {
+  const admission = failure.diagnostics.target_admission;
+  if (
+    typeof admission !== "object" ||
+    admission === null ||
+    Array.isArray(admission)
+  )
+    return undefined;
+  const source = admission.source;
+  if (typeof source !== "object" || source === null || Array.isArray(source))
+    return undefined;
+  const { size } = source;
+  return typeof size === "number" && Number.isSafeInteger(size) && size >= 0
+    ? size
+    : undefined;
+};
 
 /** A provider already observed as running can be restarted by reopening. */
 const exitedProviderMessage = (
