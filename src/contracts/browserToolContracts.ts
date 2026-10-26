@@ -3,7 +3,11 @@ import {
   javaScriptRoutesCompleteDeliveryShape,
   webRoutesSummaryDeliveryShape,
 } from "../domain/analysisView/javascriptRoutesView.js";
-import { javaScriptRoutesViewResultSchema } from "../domain/analysisView/analysisView.js";
+import {
+  javaScriptRoutesViewResultSchema,
+  webBundleSummaryViewResultSchema,
+  webBundlePageViewResultSchema,
+} from "../domain/analysisView/analysisView.js";
 import type { ToolContract } from "./toolContractTypes.js";
 import {
   inspectWebPageInputSchema,
@@ -48,7 +52,12 @@ export const analyzeWebBundleRequestSchema = z
   ])
   .meta({ "x-rea-root-discriminator": "detail" });
 const bundleOutputSchema = evidenceResultOf(
-  z.union([webBundleAnalysisSchema, javaScriptRoutesViewResultSchema]),
+  z.union([
+    webBundleAnalysisSchema,
+    javaScriptRoutesViewResultSchema,
+    webBundleSummaryViewResultSchema,
+    webBundlePageViewResultSchema,
+  ]),
 );
 const observationSessionOutputSchema = evidenceResultOf(
   webObservationSessionSchema,
