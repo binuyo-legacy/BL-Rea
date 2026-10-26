@@ -62,6 +62,8 @@ export const targetFormatSchema = z.enum([
   "godot-pck",
   "dmg",
   "pkg",
+  "intel-hex",
+  "srec",
   "plist",
   "javascript",
   "source-map",

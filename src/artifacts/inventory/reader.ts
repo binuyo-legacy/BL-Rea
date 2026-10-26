@@ -6,6 +6,7 @@ import type {
 } from "../ArtifactReader.js";
 import { DirectoryArtifactReader } from "../DirectoryArtifactReader.js";
 import { GodotPckArtifactReader } from "../GodotPckArtifactReader.js";
+import { HexRecordArtifactReader } from "../HexRecordArtifactReader.js";
 import { MachOSliceArtifactReader } from "../MachOSliceArtifactReader.js";
 import { NativeDmgArtifactReader } from "../NativeDmgArtifactReader.js";
 import { NodeSeaArtifactReader } from "../NodeSeaArtifactReader.js";
@@ -46,6 +47,9 @@ export const createReader = (
       return new NodeSeaArtifactReader(path, rootSource);
     case "godot-pck":
       return new GodotPckArtifactReader(path, rootSource);
+    case "intel-hex":
+    case "srec":
+      return new HexRecordArtifactReader(path, format, rootSource);
     case "mach-o-universal":
       return process.platform === "darwin"
         ? new MachOSliceArtifactReader(path, environment, undefined, rootSource)
@@ -84,6 +88,11 @@ export const inventoryCoverage = (
               "Node SEA inventory establishes the injected blob, flags, fuse sentinel, main script, optional code cache, snapshot, and assets. V8 snapshots and code cache are not deserialized, and the application is not executed.",
             ]
           : []),
+        ...(reader.format === "intel-hex" || reader.format === "srec"
+          ? [
+              "Intel HEX/S-record inventory decodes data records into address-contiguous regions. It does not establish CPU, byte order, memory map, or that a declared start address is executable; gaps are unwritten, not zero.",
+            ]
+          : []),
         ...traversal.limitations,
       ],
     };
@@ -107,7 +116,9 @@ export const inventoryCoverage = (
     format === "directory" ||
     format === "asar" ||
     format === "godot-pck" ||
-    format === "node-sea"
+    format === "node-sea" ||
+    format === "intel-hex" ||
+    format === "srec"
   )
     return {
       coverage: { scope: "container-entries", status: "unknown" },

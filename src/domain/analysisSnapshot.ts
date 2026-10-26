@@ -73,6 +73,8 @@ const formatSchema = z.enum([
   "godot-pck",
   "dmg",
   "pkg",
+  "intel-hex",
+  "srec",
   "plist",
   "javascript",
   "source-map",

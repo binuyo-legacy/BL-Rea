@@ -36,6 +36,7 @@ import { ZipArtifactReader } from "../ZipArtifactReader.js";
 import { isZipPackageFormat } from "../../domain/zipPackageFormat.js";
 import { MachOSliceArtifactReader } from "../MachOSliceArtifactReader.js";
 import { NodeSeaArtifactReader } from "../NodeSeaArtifactReader.js";
+import { HexRecordArtifactReader } from "../HexRecordArtifactReader.js";
 import { PyInstallerArtifactReader } from "../PyInstallerArtifactReader.js";
 import { containsPyInstallerArchive } from "../pyinstaller/CArchiveLayout.js";
 import { locateNodeSea } from "../nodeSea/NodeSeaLocation.js";
@@ -551,6 +552,8 @@ const requireExtractableFormat = async (
     !directory &&
     format !== "asar" &&
     format !== "godot-pck" &&
+    format !== "intel-hex" &&
+    format !== "srec" &&
     format !== "mach-o-universal" &&
     !isZipPackageFormat(format)
   ) {
@@ -607,6 +610,8 @@ const createReader = async (
   if (containerFormat === "pyinstaller")
     return new PyInstallerArtifactReader(path);
   if (containerFormat === "node-sea") return new NodeSeaArtifactReader(path);
+  if (containerFormat === "intel-hex" || containerFormat === "srec")
+    return new HexRecordArtifactReader(path, containerFormat);
   if (await requireExtractableFormat(path, input, signal))
     return new DirectoryArtifactReader(path);
   if (format === "asar")

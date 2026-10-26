@@ -102,7 +102,9 @@ export const classifyAndHashRootForInventory = async (
       format === "mach-o-universal" ||
       format === "godot-pck" ||
       format === "pyinstaller" ||
-      format === "node-sea";
+      format === "node-sea" ||
+      format === "intel-hex" ||
+      format === "srec";
     outcome = {
       kind: "completed",
       value: {
