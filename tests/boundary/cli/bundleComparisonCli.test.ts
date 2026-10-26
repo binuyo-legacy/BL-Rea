@@ -163,6 +163,74 @@ cliTest(
 );
 
 cliTest(
+  "accepts explicit record pairs from JSON files without inferring relationships",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-bundle-pairs-file-");
+    const observe = (value: number) =>
+      createEvidence(
+        undefined,
+        { id: "fixture", name: "Fixture", version: "1" },
+        {
+          operation: "observe",
+          parameters: {},
+          result: { value },
+          confidence: "derived",
+          authority: "analyst-inference",
+        },
+      );
+    const leftRecord = observe(1);
+    const rightRecord = observe(2);
+    const leftPath = join(root, "left.json");
+    const rightPath = join(root, "right.json");
+    const pairFile = join(root, "pairs.json");
+    const pair = {
+      left_evidence_id: leftRecord.evidence_id,
+      right_evidence_id: rightRecord.evidence_id,
+    };
+    await Promise.all([
+      writeFile(
+        leftPath,
+        serializeEvidenceBundle(createEvidenceBundle([leftRecord])),
+      ),
+      writeFile(
+        rightPath,
+        serializeEvidenceBundle(createEvidenceBundle([rightRecord])),
+      ),
+      writeFile(pairFile, JSON.stringify([pair])),
+    ]);
+    const args = ["compare", leftPath, rightPath, "--record_pairs"];
+    const inline = await cli.run({
+      arguments: [...args, JSON.stringify([pair]), "--json"],
+    });
+    const fromFile = await cli.run({
+      arguments: [
+        "compare-bundles",
+        leftPath,
+        rightPath,
+        "--record_pairs",
+        pairFile,
+        "--json",
+      ],
+    });
+    expect(inline.exitCode).toBe(0);
+    expect(fromFile.exitCode).toBe(0);
+    expect(bundleComparisonResultSchema.parse(fromFile.json)).toEqual(
+      bundleComparisonResultSchema.parse(inline.json),
+    );
+    const missingFile = join(root, "missing-pairs.json");
+    const absentFile = await cli.run({
+      arguments: [...args, missingFile, "--json"],
+    });
+    expect(absentFile.exitCode).toBe(1);
+    expect(absentFile.json).toMatchObject({
+      code: "invalid_request",
+      input_path: missingFile,
+      input_reason: "read-failed",
+    });
+  },
+);
+
+cliTest(
   "rejects relative bundle paths over stdio MCP while CLI resolves them from its cwd",
   async ({ cli }) => {
     const root = await createTestTempDirectory("rea-bundle-path-boundary-");

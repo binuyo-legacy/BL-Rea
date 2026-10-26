@@ -1,5 +1,4 @@
-import { safeParseJson } from "./domain/safeJson.js";
-import { AnalysisInputError } from "./domain/analysisErrorCore.js";
+import { parseCliJsonInput } from "./cliJsonInput.js";
 import { analysisInputErrorFromIssues } from "./domain/inputIssueProjection.js";
 import { bundleComparisonInputSchema } from "./domain/bundleComparison.js";
 import { Cli, z } from "incur";
@@ -63,7 +62,7 @@ export const registerEvidenceCommands = (
         .string()
         .optional()
         .describe(
-          "JSON array of explicit left_evidence_id/right_evidence_id observation pairs",
+          "Inline JSON array or local JSON file of left_evidence_id/right_evidence_id pairs",
         ),
     }),
     run: ({ args, options }) =>
@@ -71,21 +70,8 @@ export const registerEvidenceCommands = (
         const decoded =
           options.record_pairs === undefined
             ? { ok: true as const, value: [] }
-            : safeParseJson(options.record_pairs);
-        if (!decoded.ok)
-          return cliError(
-            new AnalysisInputError(
-              "compare_bundles",
-              { cause: decoded.cause },
-              [
-                {
-                  path: ["record_pairs"],
-                  reason: "invalid_format",
-                  expected: "JSON array",
-                },
-              ],
-            ),
-          );
+            : await parseCliJsonInput(options.record_pairs, "compare_bundles");
+        if (!decoded.ok) return decoded.error;
         const input = { record_pairs: decoded.value };
         const selected = bundleComparisonInputSchema
           .pick({ record_pairs: true })
