@@ -299,11 +299,60 @@ const selectPackageMain = (
     : { to: selected, resolution: "internal" };
 };
 
-/** Parse URL syntax before inventory lookup; require filenames remain literal. */
+/** Facts from the one ESM URL parse, shared by lookup and unresolved output. */
+interface ImportLookupPath {
+  readonly path: string;
+  readonly directory: boolean;
+  /** Query, fragment, or percent-encoding was part of the request. */
+  readonly interpreted: boolean;
+}
+
+interface ImportLookupRejection {
+  readonly message: string;
+  readonly interpreted: boolean;
+}
+
+/**
+ * Cut an ESM specifier at the first raw `?` or `#`. The suffix, marker
+ * included, is not a pathname. This is the only split; lookup and unresolved
+ * spelling both use it.
+ */
+const splitEsmSpecifier = (
+  specifier: string,
+): { readonly pathname: string; readonly suffix: string } => {
+  const componentStart = specifier.search(/[?#]/u);
+  return componentStart === -1
+    ? { pathname: specifier, suffix: "" }
+    : {
+        pathname: specifier.slice(0, componentStart),
+        suffix: specifier.slice(componentStart),
+      };
+};
+
+/**
+ * Parse one ESM specifier. Query and fragment end the pathname, and the
+ * pathname is percent-decoded once. `%2F`, `%5C`, NUL, and malformed escapes
+ * are rejections. Require filenames never reach this parser.
+ */
 const importLookupPath = (
   fromPath: string,
   specifier: string,
-): Result<{ readonly path: string; readonly directory: boolean }, string> => {
+): Result<ImportLookupPath, ImportLookupRejection> => {
+  const interpreted = /[?#%]/u.test(specifier);
+  const reject = (message: string) => err({ message, interpreted });
+  // The source directory is encoded into the URL base, so a literal backslash
+  // in that directory becomes `%5C` in the resolved pathname. Apply the
+  // separator policy to the specifier's own pathname. `%5C` is deliberately
+  // stricter than Node: Node 24 on Linux decodes it to a file literally named
+  // `a\b.mjs` and rejects only `%2F`.
+  const { pathname: specifierPath } = splitEsmSpecifier(specifier);
+  if (/%5c/iu.test(specifierPath))
+    return err({
+      message:
+        "Historical module URL paths cannot contain " +
+        "percent-encoded backslash bytes.",
+      interpreted: true,
+    });
   // A private origin is only a logical pathname base, never a filesystem access.
   let source: URL;
   try {
@@ -313,21 +362,25 @@ const importLookupPath = (
     );
   } catch (cause: unknown) {
     if (!(cause instanceof URIError)) throw cause;
-    return err("The source path cannot be represented as a module URL.");
+    return reject("The source path cannot be represented as a module URL.");
   }
   const target = URL.parse(specifier, source);
   if (target === null || target.protocol !== "file:" || target.host !== "")
-    return err(
+    return reject(
       "The module URL cannot be resolved within the source inventory.",
     );
   if (!target.pathname.startsWith("/rea-reference/"))
-    return err("The module URL escapes the selected source inventory.");
+    return reject("The module URL escapes the selected source inventory.");
   const decoded = decodeReferenceSourceModuleUrlPath(
     target.pathname.slice("/rea-reference/".length),
   );
   return decoded.ok
-    ? ok({ path: decoded.value, directory: target.pathname.endsWith("/") })
-    : decoded;
+    ? ok({
+        path: decoded.value,
+        directory: target.pathname.endsWith("/"),
+        interpreted,
+      })
+    : reject(decoded.error);
 };
 
 const resolveInternalSpecifier = (
@@ -335,36 +388,27 @@ const resolveInternalSpecifier = (
   specifier: string,
   context: SpecifierContext,
   mode: InternalSpecifierResolutionMode,
+  lookup?: ImportLookupPath,
 ): {
   to: string;
   resolution: "internal" | "unresolved";
   limitation?: string;
 } => {
-  if (posix.isAbsolute(specifier))
+  if (lookup === undefined && posix.isAbsolute(specifier))
     return { to: specifier, resolution: "unresolved" };
-  const imported =
-    mode === "source-import"
-      ? importLookupPath(fromPath, specifier)
-      : undefined;
-  if (imported !== undefined && !imported.ok)
-    return {
-      to: specifier,
-      resolution: "unresolved",
-      limitation: imported.error,
-    };
   const normalizedPath =
-    imported?.ok === true
-      ? imported.value.path
-      : posix.normalize(posix.join(posix.dirname(fromPath), specifier));
+    lookup === undefined
+      ? posix.normalize(posix.join(posix.dirname(fromPath), specifier))
+      : lookup.path;
   const normalized = normalizedPath.replace(/(?<=.)\/+$/u, "") || ".";
   if (logicalPathEscapesRoot(normalized))
     return { to: normalized, resolution: "unresolved" };
   // Preserve directory intent before normalization removes terminal dot segments.
   const directoryReference =
-    imported?.ok === true
-      ? imported.value.directory
-      : specifier.endsWith("/") ||
-        [".", ".."].includes(posix.basename(specifier));
+    lookup === undefined
+      ? specifier.endsWith("/") ||
+        [".", ".."].includes(posix.basename(specifier))
+      : lookup.directory;
   // A directory resolves only to an index with an extension; neither Node nor
   // TypeScript selects an extensionless `index` file.
   const slots = resolutionSuffixes(mode);
@@ -407,6 +451,65 @@ const resolveInternalSpecifier = (
   return resolvedThroughIndex
     ? selectPackageMain(posix.dirname(match), match, context, mode)
     : { to: match, resolution: "internal" };
+};
+
+/**
+ * Source spelling of an unresolved request, before URL interpretation.
+ * Only the pathname is joined and normalized. The query or fragment suffix
+ * stays as written, so `./missing.mjs?v=1/..` does not collapse to `.`.
+ */
+const unresolvedSourceSpelling = (
+  fromPath: string,
+  specifier: string,
+): string => {
+  if (posix.isAbsolute(specifier)) return specifier;
+  const { pathname, suffix } = splitEsmSpecifier(specifier);
+  return (
+    posix.normalize(posix.join(posix.dirname(fromPath), pathname)) + suffix
+  );
+};
+
+/**
+ * Source imports use `importLookupPath`'s parsed pathname. An interpreted
+ * request that does not match inventory keeps its source spelling. Require
+ * modes resolve the literal specifier and do not parse URL components.
+ */
+const resolveImportSpecifier = (
+  fromPath: string,
+  specifier: string,
+  context: SpecifierContext,
+  mode: InternalSpecifierResolutionMode,
+): {
+  to: string;
+  resolution: "internal" | "unresolved";
+  limitation?: string;
+} => {
+  if (mode !== "source-import")
+    return resolveInternalSpecifier(fromPath, specifier, context, mode);
+  if (posix.isAbsolute(specifier))
+    return { to: specifier, resolution: "unresolved" };
+  const imported = importLookupPath(fromPath, specifier);
+  if (!imported.ok)
+    return {
+      to: imported.error.interpreted
+        ? unresolvedSourceSpelling(fromPath, specifier)
+        : specifier,
+      resolution: "unresolved",
+      limitation: imported.error.message,
+    };
+  const resolved = resolveInternalSpecifier(
+    fromPath,
+    specifier,
+    context,
+    mode,
+    imported.value,
+  );
+  if (resolved.resolution === "internal" || !imported.value.interpreted)
+    return resolved;
+  return {
+    to: unresolvedSourceSpelling(fromPath, specifier),
+    resolution: "unresolved",
+  };
 };
 
 type ReadFile = Extract<ReferenceSourceEntry, { status: "read"; kind: "file" }>;
@@ -471,7 +574,7 @@ const appendFile = (
         : graphRelationship.kind === "requires"
           ? "source-require"
           : "source-import";
-    const resolved = resolveInternalSpecifier(
+    const resolved = resolveImportSpecifier(
       resolutionBasePath ?? graphRelationship.from_path,
       graphRelationship.to,
       context,
