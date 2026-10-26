@@ -185,6 +185,26 @@ const equalBytes = (a: Uint8Array, b: Uint8Array): boolean =>
   a.length === b.length && a.every((byte, i) => byte === b[i]);
 
 /**
+ * X.690 §8.3.2: a leading 0x00 is redundant while the next octet's high bit
+ * is clear, and a leading 0xff is redundant while that bit is set. apksig
+ * compares certificate serials as those integer values, not as raw contents.
+ */
+const derIntegerContentsEqual = (left: Uint8Array, right: Uint8Array): boolean => {
+  const minimal = (bytes: Uint8Array): Uint8Array => {
+    let index = 0;
+    while (index < bytes.length - 1) {
+      const head = bytes[index] ?? 0;
+      const nextHigh = ((bytes[index + 1] ?? 0) & 0x80) !== 0;
+      const redundant = (head === 0x00 && !nextHigh) || (head === 0xff && nextHigh);
+      if (!redundant) break;
+      index += 1;
+    }
+    return bytes.subarray(index);
+  };
+  return equalBytes(minimal(left), minimal(right));
+};
+
+/**
  * RFC 5280 §7.1: RDN order matters; attributes in one SET do not. This
  * comparison profile admits ASCII PrintableString/UTF8String for common
  * caseIgnore DirectoryString attributes. Other name rules remain unknown;
@@ -328,7 +348,7 @@ const signerInfo = (
         identity !== null &&
         (equalBytes(identity.issuer, issuer) ||
           (issuerKey !== null && identity.issuerKey === issuerKey)) &&
-        equalBytes(identity.serial, serial),
+        derIntegerContentsEqual(identity.serial, serial),
     );
   } else if (sid?.tag === TAG.context0Primitive) {
     const keyId = sid.content;

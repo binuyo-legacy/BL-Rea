@@ -6,6 +6,7 @@ import {
   indefinite,
   oid,
   withIssuer,
+  withSerial,
   LEAF_CERTIFICATE,
   LEAF_SHA256,
   OID_ECDSA_SHA256,
@@ -303,6 +304,40 @@ it("matches supported issuer strings across encodings and RDN attribute order, p
         LEAF_CERTIFICATE,
         name(attribute("2.5.4.3", 0x14, "REA Root")),
       ),
+    ),
+  ).toBeNull();
+});
+
+it("matches v1 signer serials as DER integers, including redundant sign octets", () => {
+  // X.690 §8.3.2: a leading 0x00 is redundant only while the next octet's
+  // high bit is clear, and a leading 0xff is redundant only while that bit
+  // is set. apksig compares these contents as BigInteger values.
+  const identify = (certificate: Uint8Array, serial: Uint8Array) =>
+    decoded(
+      signedDataBlock({
+        certificates: [certificate],
+        signerInfos: [signerInfo({ names: certificate, serial })],
+      }),
+    ).signerInfos[0]?.certificateIndex;
+
+  expect(identify(LEAF_CERTIFICATE, Uint8Array.of(0x00, 0x12, 0x34))).toBe(0);
+  expect(
+    identify(
+      withSerial(LEAF_CERTIFICATE, tlv(0x02, Uint8Array.of(0xff))),
+      Uint8Array.of(0xff, 0xff),
+    ),
+  ).toBe(0);
+  // 0x00 0x80 is +128; a bare 0x80 is -128. 0xff 0x7f is -129, not 0x7f.
+  expect(
+    identify(
+      withSerial(LEAF_CERTIFICATE, tlv(0x02, Uint8Array.of(0x00, 0x80))),
+      Uint8Array.of(0x80),
+    ),
+  ).toBeNull();
+  expect(
+    identify(
+      withSerial(LEAF_CERTIFICATE, tlv(0x02, Uint8Array.of(0xff, 0x7f))),
+      Uint8Array.of(0x7f),
     ),
   ).toBeNull();
 });
