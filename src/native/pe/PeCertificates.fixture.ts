@@ -67,6 +67,10 @@ export const pkcs7SignedDataFixture = (
   commonName = "REA Fixture",
   organization = "REA Tests",
   signature = octet(Buffer.from("sig")),
+  attributes: {
+    readonly authenticated?: Buffer;
+    readonly unauthenticated?: Buffer;
+  } = {},
 ): Buffer => {
   const serial = Buffer.from([0x11, 0x22, 0x33, 0x44]);
   const subject = name(commonName, organization);
@@ -92,8 +96,14 @@ export const pkcs7SignedDataFixture = (
     integer(1),
     seq(subject, integer(serial)),
     algorithm(SHA256),
+    ...(attributes.authenticated === undefined
+      ? []
+      : [context(0, attributes.authenticated)]),
     algorithm(SHA256_RSA),
     signature,
+    ...(attributes.unauthenticated === undefined
+      ? []
+      : [context(1, attributes.unauthenticated)]),
   );
   const signedData = seq(
     integer(1),
@@ -103,6 +113,41 @@ export const pkcs7SignedDataFixture = (
     set(signer),
   );
   return seq(SIGNED_DATA, context(0, signedData));
+};
+
+const NESTED_SIGNATURE = oid([1, 3, 6, 1, 4, 1, 311, 2, 4, 1]);
+const RFC3161_TIMESTAMP = oid([1, 3, 6, 1, 4, 1, 311, 3, 3, 1]);
+const SIGNING_CERTIFICATE_V2 = oid([1, 2, 840, 113549, 1, 9, 16, 2, 47]);
+
+/**
+ * Windows dual-signing shape, 34 levels deep like signed system binaries: the
+ * signature's unsigned attributes embed a nested signature, whose own unsigned
+ * attributes embed an RFC 3161 timestamp. The timestamp's signed ESS
+ * signingCertificateV2 issuer name is the deepest branch.
+ */
+export const pkcs7DualSignedTimestampedFixture = (): Buffer => {
+  const issuerSerial = seq(
+    seq(context(4, name("REA Timestamp CA", "REA Tests"))),
+    integer(Buffer.from([0x11, 0x22, 0x33, 0x44])),
+  );
+  const signingCertificate = attribute(
+    SIGNING_CERTIFICATE_V2,
+    set(seq(seq(seq(octet(Buffer.alloc(32)), issuerSerial)))),
+  );
+  const timestamp = pkcs7SignedDataFixture(
+    "REA Timestamp",
+    "REA Tests",
+    undefined,
+    {
+      authenticated: signingCertificate,
+    },
+  );
+  const nested = pkcs7SignedDataFixture("REA Nested", "REA Tests", undefined, {
+    unauthenticated: attribute(RFC3161_TIMESTAMP, set(timestamp)),
+  });
+  return pkcs7SignedDataFixture(undefined, undefined, undefined, {
+    unauthenticated: attribute(NESTED_SIGNATURE, set(nested)),
+  });
 };
 
 /** Same CMS fields with a BER indefinite-length outer ContentInfo SEQUENCE. */
