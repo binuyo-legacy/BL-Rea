@@ -593,6 +593,72 @@ it.skipIf(process.platform !== "linux")(
   },
 );
 
+const launchNativeHelper = async (
+  dependencies: ConstructorParameters<typeof HopperApplicationLauncher>[1],
+) => {
+  const directory = await createTestTempDirectory("rea-hopper-native-helper-");
+  const targetPath = join(directory, "target");
+  await writeFile(targetPath, "fixture target");
+  const launcher = new HopperApplicationLauncher(
+    {
+      environment: {},
+      launcherPath: process.execPath,
+      targetPath,
+      targetKind: "executable",
+      loaderArgs: ["-e", "process.exit(0)", "--"],
+      bridgeScriptPath: "/rea/unused-bridge.py",
+      launchMode: "native",
+    },
+    dependencies,
+  );
+  const launched = await launcher.launch({
+    directory,
+    socketPath: join(directory, "bridge.sock"),
+    token: "fixture-token",
+    runId: randomUUID(),
+  });
+  if (!launched.ok) throw launched.error;
+  const supervisor = new ProviderProcessSupervisor(launched.value);
+  await supervisor.waitForOutputClose(5_000);
+  await supervisor.stop();
+  await launched.value.releaseLease?.();
+  return launched.value;
+};
+
+it.each([true, false])(
+  "marks only a verified native helper as pre-handoff evidence (%s)",
+  async (verified) => {
+    const checked: string[] = [];
+    const launch = await launchNativeHelper({
+      platform: "darwin",
+      verifyNativeHelper(path) {
+        checked.push(path);
+        return Promise.resolve(verified ? "verified" : "unknown");
+      },
+    });
+    expect(checked).toEqual([process.execPath]);
+    expect(launch.nativeHelperVerified).toBe(verified ? true : undefined);
+  },
+);
+
+it("does not verify the helper outside macOS", async () => {
+  const launch = await launchNativeHelper({
+    platform: "linux",
+    verifyNativeHelper() {
+      throw new Error("The helper must not be verified outside macOS");
+    },
+  });
+  expect(launch.nativeHelperVerified).toBeUndefined();
+});
+
+it.skipIf(process.platform !== "darwin")(
+  "rejects an executable that is not Hopper's signed helper",
+  async () => {
+    const launch = await launchNativeHelper({});
+    expect(launch.nativeHelperVerified).toBeUndefined();
+  },
+);
+
 it.skipIf(process.platform !== "linux")(
   "preserves a publisher rejection through the public error without inventing a helper exit",
   async () => {
