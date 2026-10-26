@@ -6,6 +6,7 @@ import {
   lstat,
   open,
   readdir,
+  rename,
   rm,
   utimes,
   writeFile,
@@ -15,8 +16,53 @@ import { join } from "node:path";
 
 import { expect, it } from "vitest";
 
-import { hashFile } from "./FilesystemSnapshot.js";
+import {
+  hashFile,
+  snapshotRoots,
+  ProcessCaptureSnapshotFailure,
+} from "./FilesystemSnapshot.js";
 import { ProcessCaptureReadFailure } from "./ProcessCaptureRead.js";
+import { parseProcessScenario } from "../../domain/process/processScenario.js";
+import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
+
+it("rejects cancellation during a now-inaccessible observed root lookup", async () => {
+  const directory = await createTestTempDirectory(
+    "rea-snapshot-absent-cancel-",
+  );
+  const parent = join(directory, "reports");
+  const selected = join(parent, "final.json");
+  await mkdir(parent);
+  await writeFile(selected, "observed\n");
+  const scenario = parseProcessScenario({
+    executable: process.execPath,
+    working_directory: directory,
+    filesystem_observation_paths: [selected],
+  });
+  const before = await snapshotRoots(scenario);
+  await rename(parent, join(directory, "saved-reports"));
+  await writeFile(parent, "regular file");
+  const controller = new AbortController();
+  const reason = new Error("Caller cancelled the observed root lookup");
+  const pending = snapshotRoots(scenario, controller.signal, before);
+  controller.abort(reason);
+
+  const failure = await pending.then(
+    () => {
+      throw new Error("Expected snapshot cancellation");
+    },
+    (cause: unknown) => cause,
+  );
+  expect(failure).toBeInstanceOf(ProcessCaptureSnapshotFailure);
+  if (!(failure instanceof ProcessCaptureSnapshotFailure)) throw failure;
+  expect(failure.cause).toBe(reason);
+  expect(failure).toMatchObject({
+    userCategory: "cancelled",
+    reason: "cancelled",
+    snapshot: { files: [], completeRoots: [], truncated: true },
+    cleanupLeases: [],
+    readFailures: [],
+  });
+});
 
 const countOpenDescriptorsFor = async (path: string): Promise<number> => {
   const directory = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
