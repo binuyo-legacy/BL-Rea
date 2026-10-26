@@ -189,7 +189,8 @@ function* buildJavaScriptArtifactGraphInputSteps(
   yield;
   addJavaScriptSourceMapOriginals(projectionContext);
   yield;
-  const coverage = graphCoverage(context);
+  const resourceLimits = semanticResourceLimits(context.analysis);
+  const coverage = graphCoverage(context, resourceLimits);
   return {
     schema: "JavaScriptApplicationGraph",
     root_node_ids:
@@ -202,13 +203,20 @@ function* buildJavaScriptArtifactGraphInputSteps(
     limitations: [
       ...bundlerLimitations,
       ...findingLimitations,
-      ...graphLimitations(context, coverage.status, relationshipOmissions),
+      ...graphLimitations(
+        context,
+        coverage.status,
+        relationshipOmissions,
+        resourceLimits,
+      ),
     ],
   };
 }
 
-const graphCoverage = (context: JavaScriptArtifactGraphContext) => {
-  const resourceLimits = semanticResourceLimits(context);
+const graphCoverage = (
+  context: JavaScriptArtifactGraphContext,
+  resourceLimits: readonly JavaScriptSemanticResourceLimit[],
+) => {
   const sourceMapPolicyGap = context.analysis.source_maps.some(
     ({ status }) => status === "invalid",
   );
@@ -279,11 +287,11 @@ const graphCoverage = (context: JavaScriptArtifactGraphContext) => {
 };
 
 const semanticResourceLimits = (
-  context: JavaScriptArtifactGraphContext,
+  analysis: JavaScriptArtifactAnalysis,
 ): JavaScriptSemanticResourceLimit[] =>
   [
     ...new Set(
-      context.analysis.files.flatMap(({ semantic }) =>
+      analysis.files.flatMap(({ semantic }) =>
         semantic === null
           ? []
           : semanticCoverageResourceLimits(semantic.ir.coverage),
@@ -295,6 +303,7 @@ const graphLimitations = (
   context: JavaScriptArtifactGraphContext,
   coverage: "complete" | "partial" | "unknown" | "unavailable",
   relationshipOmissions: JavaScriptModuleRelationshipOmissions,
+  resourceLimits: readonly JavaScriptSemanticResourceLimit[],
 ): string[] => {
   const ipc = collectElectronIpcRecords(context.analysis);
   const pairings = classifyElectronIpcPairings(ipc);
@@ -359,7 +368,7 @@ const graphLimitations = (
           "Sender, frame, URL, and origin checks are observations only; REA does not claim that they enforce a complete authorization policy.",
         ]
       : []),
-    ...semanticResourceLimits(context).map(semanticResourceLimitReason),
+    ...resourceLimits.map(semanticResourceLimitReason),
     ...(context.analysis.files.some(
       ({ javascript }) =>
         (javascript?.electron.native_addon_bindings.length ?? 0) > 0,

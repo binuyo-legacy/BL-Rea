@@ -51,6 +51,8 @@ interface RelationshipInput {
   readonly semantic: SemanticAnalysis;
   readonly source: ApplicationNode;
   readonly link: JavaScriptSemanticModuleLink;
+  readonly coverage: JavaScriptArtifactGraphCoverage;
+  readonly baseLimitations: readonly string[];
 }
 
 type ResolvedModuleTarget = {
@@ -163,11 +165,28 @@ export function* addJavaScriptModuleRelationshipsSteps(
     const { file, semantic } = analyzed;
     const source = context.sourceModuleNodes.get(file.path);
     if (semantic === null || source === undefined) continue;
+    let coverage: JavaScriptArtifactGraphCoverage | undefined;
+    let baseLimitations: readonly string[] | undefined;
     for (const link of semantic.ir.moduleLinks) {
       // One module can export thousands of bindings, each with return shapes.
       yield;
       if (link.kind === "type-import") continue;
-      const input = { context, file, semantic, source, link };
+      coverage ??= semanticCoverage(semantic);
+      baseLimitations ??= [
+        ...semantic.ir.limitations,
+        ...semanticCoverageResourceLimits(semantic.ir.coverage).map(
+          semanticResourceLimitReason,
+        ),
+      ];
+      const input = {
+        context,
+        file,
+        semantic,
+        source,
+        link,
+        coverage,
+        baseLimitations,
+      };
       if (isExportLink(link)) addExportRelationship(input, omissions);
       else if (link.specifier !== null)
         addImportRelationship(input, source, omissions, {
@@ -428,15 +447,9 @@ const relationshipEvidence = (
     path: input.file.path,
     range: input.link.location,
     operation,
-    coverage: semanticCoverage(input.semantic),
+    coverage: input.coverage,
     confidence,
-    limitations: [
-      ...input.semantic.ir.limitations,
-      ...semanticCoverageResourceLimits(input.semantic.ir.coverage).map(
-        semanticResourceLimitReason,
-      ),
-      ...limitations,
-    ],
+    limitations: [...input.baseLimitations, ...limitations],
   });
 
 const semanticCoverage = (
