@@ -16,10 +16,13 @@ import {
   AnalysisCancelledError,
   AnalysisCapabilityUnavailableError,
   AnalysisInputError,
+  AnalysisTimeoutError,
 } from "../domain/analysisErrorCore.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 import type { AndroidRequest } from "../domain/android/androidAnalysis.js";
+import type { AndroidMappingSource } from "../domain/android/androidMapping.js";
+import { readAndroidMapping } from "./AndroidMappingFile.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import { err, ok, type Result } from "../domain/result.js";
 import {
@@ -47,6 +50,7 @@ import type { JadxLauncher } from "./JadxMcpTransport.js";
 
 import { JadxSession } from "./JadxSession.js";
 import { captureJadxFailure } from "./JadxFailure.js";
+import { jadxOperationTimeoutGuidance } from "./JadxOperationTimeout.js";
 
 const BRIDGE_SOURCE = fileURLToPath(
   new URL("../../bridge/android/ReaJadxBridge.java", import.meta.url),
@@ -356,7 +360,8 @@ export class JadxProvider implements AndroidAnalysisPort {
         if (!retired.ok) return retired;
       }
       const outcome = await this.#execute(target, request, { signal });
-      if (outcome.ok) this.#scheduleIdle();
+      // A refusal before session work, such as a bad mapping, keeps the session.
+      if (outcome.ok || this.#retained !== undefined) this.#scheduleIdle();
       return outcome;
     } finally {
       release();
@@ -428,6 +433,36 @@ export class JadxProvider implements AndroidAnalysisPort {
     return result;
   }
 
+  async #readMapping(
+    request: AndroidRequest,
+    signal: AbortSignal,
+    deadline: { readonly timeout: AbortSignal; readonly timeoutMs: number },
+  ): Promise<Result<AndroidMappingSource | undefined, AnalysisError>> {
+    if (
+      !("mapping_path" in request.input) ||
+      request.input.mapping_path === undefined
+    )
+      return ok(undefined);
+    const read = await readAndroidMapping(
+      request.input.mapping_path,
+      request.operation,
+      this.#prerequisites,
+      signal,
+    );
+    if (
+      read.ok ||
+      !(read.error instanceof AnalysisCancelledError) ||
+      !deadline.timeout.aborted
+    )
+      return read;
+    return err(
+      new AnalysisTimeoutError(request.operation, deadline.timeoutMs, {
+        cause: deadline.timeout.reason,
+        ...jadxOperationTimeoutGuidance(deadline.timeoutMs),
+      }),
+    );
+  }
+
   #scheduleIdle(): void {
     this.#idle = setTimeout(() => {
       this.#tail = this.#tail.then(async () => {
@@ -440,7 +475,7 @@ export class JadxProvider implements AndroidAnalysisPort {
   async #execute(
     target: BinaryTarget,
     request: AndroidRequest,
-    options?: ExecutionOptions,
+    options: ExecutionOptions,
   ): Promise<Outcome> {
     // Resolve the accepted operation's override before acquiring any resource.
     // An unusable launch value is refused without starting the engine.
@@ -452,9 +487,17 @@ export class JadxProvider implements AndroidAnalysisPort {
     if (!timeoutMs.ok) return timeoutMs;
     const timeout = AbortSignal.timeout(timeoutMs.value);
     const signal =
-      options?.signal === undefined
+      options.signal === undefined
         ? timeout
         : AbortSignal.any([options.signal, timeout]);
+    // The mapping is read inside the turn and under the deadline, so one
+    // parsed mapping is held at a time and a slow read cannot hold the queue.
+    // Its failure is the caller's input and returns before any session work.
+    const mapping = await this.#readMapping(request, signal, {
+      timeout,
+      timeoutMs: timeoutMs.value,
+    });
+    if (!mapping.ok) return mapping;
     let root: JadxWorkspaceRoot | undefined;
     let session: JadxSession | undefined;
     const fileHandles: PendingCleanup["fileHandles"] = new Map();
@@ -616,6 +659,7 @@ export class JadxProvider implements AndroidAnalysisPort {
           bridgeHash: retained.bridgeHash,
           signal: activeSignal,
           timeoutMs: timeoutMs.value,
+          mapping: mapping.value,
         }),
       );
       throwIfJadxInterrupted(activeSignal);
@@ -627,7 +671,7 @@ export class JadxProvider implements AndroidAnalysisPort {
         request,
         timeout,
         timeoutMs: timeoutMs.value,
-        signal: options?.signal,
+        signal: options.signal,
         session,
       });
       // Admission can fail before selecting an existing session for execution.

@@ -31,6 +31,14 @@ export const registerAndroidCommands = (
     );
   const path = z.string().describe("Local standalone APK path");
   const className = z.string().describe("Exact fully qualified class name");
+  const mappingPath = z
+    .string()
+    .optional()
+    .describe(
+      "Absolute local R8/ProGuard mapping.txt; names are annotated, never replaced",
+    );
+  const mappingInput = (path: string | undefined) =>
+    path === undefined ? {} : { mapping_path: path };
   cli.command(CLI_COMMANDS.inspectAndroidPackage, {
     description:
       "Inspect APK declarations and decoded manifest without executing it",
@@ -62,10 +70,12 @@ export const registerAndroidCommands = (
   cli.command(CLI_COMMANDS.inspectAndroidClass, {
     description: "Inspect one exact APK class's member inventory",
     args: z.object({ path, className }),
-    run: ({ args }) =>
+    options: z.object({ mappingPath }),
+    run: ({ args, options }) =>
       execute(CLI_COMMANDS.inspectAndroidClass, "inspect_android_class", {
         path: args.path,
         class_name: args.className,
+        ...mappingInput(options.mappingPath),
       }),
   });
   cli.command(CLI_COMMANDS.inspectAndroidMethod, {
@@ -84,12 +94,14 @@ export const registerAndroidCommands = (
         .describe(
           "Explicit zero-based index among same-name methods; required when ambiguous",
         ),
+      mappingPath,
     }),
     run: ({ args, options }) =>
       execute(CLI_COMMANDS.inspectAndroidMethod, "inspect_android_method", {
         path: args.path,
         class_name: args.className,
         method_name: args.methodName,
+        ...mappingInput(options.mappingPath),
         ...(options.overloadIndex === undefined
           ? {}
           : { overload_index: options.overloadIndex }),
