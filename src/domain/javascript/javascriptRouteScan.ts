@@ -33,6 +33,7 @@ import {
 } from "./javascriptSemanticAliasSelections.js";
 import { semanticProjectedSourcesAtRead } from "./javascriptSemanticProjectedSources.js";
 import { semanticBindingAtRead } from "./javascriptSemanticMutationInitializers.js";
+import { javaScriptRuntimeContext } from "./javascriptSourceParser.js";
 import {
   semanticObjectPropertyReferences,
   semanticArrayPropertyReferences,
@@ -1024,6 +1025,13 @@ export class JavaScriptRouteScan {
       seen.add(node);
       const binding = index.bindingForReferenceAt(node);
       if (binding === undefined) return;
+      // Without runtime isolation, program-var may alias global properties.
+      if (
+        binding.declarationKinds.has("var") &&
+        index.bindings.scopesById.get(binding.scopeId)?.kind === "program" &&
+        javaScriptRuntimeContext(index.bindings.program) === "unknown"
+      )
+        return;
       const read = semanticBindingAtRead(
         binding,
         node,
