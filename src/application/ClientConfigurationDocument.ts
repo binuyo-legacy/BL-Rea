@@ -169,8 +169,9 @@ const parseDocument = (
   // ZCode loads nonempty native files with strict JSON.parse.
   if (format === "zcode")
     return requireObject(JSON.parse(text), "The configuration root");
-  // Claude Code loads `.claude.json` with strict JSON.parse after a UTF-8 BOM,
-  // so comments and trailing commas it rejects must not be admitted as JSONC.
+  // Claude Code and Claude Desktop load their configuration with strict
+  // JSON.parse after a UTF-8 BOM, so comments and trailing commas they reject
+  // must not be admitted as JSONC.
   if (format === "claude_code")
     return requireObject(
       JSON.parse(text.replace(/^\uFEFF/, "")),

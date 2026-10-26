@@ -518,7 +518,7 @@ export const SUPPORTED_CLIENT_DEFINITIONS = [
     displayName: "Claude Desktop",
     location: claudeDesktopLocation,
     quitBeforeSetup: true,
-    format: "json",
+    format: "claude_code",
   },
   {
     name: "codex",
