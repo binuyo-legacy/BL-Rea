@@ -514,6 +514,46 @@ describe("Ghidra installation inspection", () => {
   );
 });
 
+describe("Ghidra missing native decompiler remediation", () => {
+  it.each([
+    ["darwin", "arm64", true],
+    ["darwin", "x64", true],
+    ["linux", "arm64", true],
+    ["linux", "x64", false],
+  ] as const)(
+    "names buildNatives for %s/%s only where releases omit natives (%s)",
+    async (platform, architecture, expectsHint) => {
+      const result = await inspectGhidraInstallation(
+        {
+          resourceOwner: inspectionResources.owner,
+          environment: {},
+          installDir: INSTALL,
+          platform,
+          architecture,
+        },
+        host({
+          executable: (path) => path === HEADLESS,
+          probeJava: () =>
+            javaProbeOk<GhidraJavaObservation>({
+              ...JAVA,
+              osArch: architecture === "arm64" ? "aarch64" : "amd64",
+              osName: platform === "darwin" ? "Mac OS X" : "Linux",
+            }),
+        }),
+      );
+      const check = result.checks.find(
+        ({ name }) => name === "native_decompiler",
+      );
+      expect(check).toMatchObject({
+        status: "failed",
+        code: "executable_missing",
+      });
+      const remediation = check?.status === "failed" ? check.remediation : "";
+      expect(remediation.includes("gradlew buildNatives")).toBe(expectsHint);
+    },
+  );
+});
+
 describe("Ghidra Windows installation commitment", () => {
   it("accepts the exact Windows x64 batch launcher and JDK commitment", async () => {
     const windowsHost: GhidraInstallationHost = {

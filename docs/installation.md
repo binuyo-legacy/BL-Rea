@@ -977,8 +977,11 @@ does not satisfy this host-validated admission rule. Current 12.1 releases requi
 JDK 21 or newer and set no maximum. The bridge is verified with Ghidra 12.1.4
 and JDK 21. Each installation must include the native decompiler for the host
 architecture in `Ghidra/Features/Decompiler/os/<platform>/` or the corresponding
-`build/os/<platform>/` directory. Linux ARM64 uses `linux_arm_64`; official
-release archives may require you to build that native component separately.
+`build/os/<platform>/` directory. Linux ARM64 uses `linux_arm_64`; macOS uses
+`mac_arm_64` or `mac_x86_64`. Official release archives include native binaries
+only for Windows and Linux x86-64, so on macOS and Linux ARM64 build them once
+with `support/gradle/gradlew buildNatives` (or `gradle buildNatives`) inside the
+Ghidra installation; the result lands in `build/os/<platform>/`.
 REA checks the executable prerequisite by inspecting the file's own executable
 header, so a native component built for another platform or architecture is
 reported as incompatible instead of being admitted from its directory name, and

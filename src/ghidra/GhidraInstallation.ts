@@ -952,9 +952,22 @@ const nativeDecompilerCheck = ({
     remediation:
       compatibility?.status === "incompatible"
         ? compatibility.remediation
-        : `Provide an executable Ghidra/Features/Decompiler/os/${NATIVE_PLATFORMS[platform]?.[architecture] ?? "<platform>"}/${platform === "win32" ? "decompile.exe" : "decompile"}, or its build/os equivalent. REA does not build or install native tools.`,
+        : `Provide an executable Ghidra/Features/Decompiler/os/${NATIVE_PLATFORMS[platform]?.[architecture] ?? "<platform>"}/${platform === "win32" ? "decompile.exe" : "decompile"}, or its build/os equivalent.${userBuiltNativeHint(platform, architecture)} REA does not build or install native tools.`,
   });
 };
+
+/**
+ * Official Ghidra release archives ship native binaries only for Windows and
+ * Linux x86-64; macOS and Linux arm64 hosts must build them once. Name the
+ * documented Ghidra command so a missing decompiler is actionable.
+ */
+const userBuiltNativeHint = (
+  platform: NodeJS.Platform,
+  architecture: string,
+): string =>
+  platform === "darwin" || (platform === "linux" && architecture === "arm64")
+    ? " Official Ghidra release archives include native binaries only for Windows and Linux x86-64; build them once with support/gradle/gradlew buildNatives in the Ghidra installation."
+    : "";
 
 /**
  * Whether a JVM os.name value selects the host platform's native OS directory.
