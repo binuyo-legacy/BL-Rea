@@ -12,6 +12,7 @@ import { CdpCaptureEvents } from "./CdpCaptureEvents.js";
 import { authorizedMainFrame } from "./CdpAuthorizedMainFrame.js";
 import { cdpOriginScopeRefusal } from "./CdpOriginScopeError.js";
 import { captureStorage } from "./CdpCaptureStorage.js";
+import { captureCssVariables } from "./CdpCaptureCssVariables.js";
 import { optionalCdpCommand } from "./CdpOptionalCommand.js";
 import { CdpCommandRejection } from "./CdpCommandRejection.js";
 import {
@@ -66,6 +67,7 @@ interface CapturedSections {
   readonly resources: WebPageInspection["resources"];
   readonly workers: WebPageInspection["workers"];
   readonly storage: WebPageInspection["storage"];
+  readonly cssVariables: WebPageInspection["css_variables"];
 }
 
 export interface CapturedPage {
@@ -194,6 +196,26 @@ const captureAuthorizedPage = async (
     attachedUrl,
     limitations,
   );
+  const cssVariables =
+    context.operation === "analyze_web_bundle"
+      ? {
+          status: "not_approved" as const,
+          origin_scope: "same_origin" as const,
+          total: 0,
+          retained_count: 0,
+          items: [],
+        }
+      : await captureCssVariables(
+          { ...context, events: state.events },
+          limitations,
+        );
+  if ("include_css_variables" in input && input.include_css_variables) {
+    if (cssVariables.status === "unavailable") {
+      state.events.completeness.unavailable("css_variables");
+    } else if (cssVariables.status === "truncated") {
+      state.events.completeness.truncate("css_variables");
+    }
+  }
   if (!input.include_storage_keys)
     state.events.completeness.exclude("storage_keys", "not_approved", null);
   else if (storageCapture.keysExclusion !== undefined)
@@ -230,6 +252,7 @@ const captureAuthorizedPage = async (
       resources,
       workers,
       storage: storageCapture.value,
+      cssVariables,
     }),
     sourceMapRequests: scripts.sourceMapRequests,
   };
@@ -422,6 +445,7 @@ const normalizedInspection = (
     headers_allowlisted: true,
   },
   storage: captured.storage,
+  css_variables: captured.cssVariables,
   limitations: state.limitations,
 });
 

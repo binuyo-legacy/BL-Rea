@@ -261,6 +261,39 @@ const browserSafeMetadataSchema = z.object({
   headers_allowlisted: z.literal(true),
 });
 
+export const browserCssVariableItemSchema = z.object({
+  name: z
+    .string()
+    .regex(/^--[\p{L}\p{N}\p{M}_\-]+$/u)
+    .max(128),
+  value: z
+    .string()
+    .max(512)
+    .refine(
+      (val) =>
+        !/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]/u.test(
+          val,
+        ),
+      {
+        message:
+          "Disallowed control characters or bidirectional overrides in CSS variable value",
+      },
+    ),
+  redacted: z.boolean().default(false),
+});
+export type BrowserCssVariableItem = z.infer<
+  typeof browserCssVariableItemSchema
+>;
+
+export const browserCssVariablesSchema = z.object({
+  status: z.enum(["not_approved", "included", "unavailable", "truncated"]),
+  origin_scope: z.enum(["same_origin", "all_allowed"]).default("same_origin"),
+  total: z.int().min(0),
+  retained_count: z.int().min(0),
+  items: z.array(browserCssVariableItemSchema).max(250),
+});
+export type BrowserCssVariables = z.infer<typeof browserCssVariablesSchema>;
+
 /** Provider-neutral normalized result for one passive web-page observation. */
 export const webPageInspectionSchema = z.object({
   browser: browserVersionSchema,
@@ -340,6 +373,13 @@ export const webPageInspectionSchema = z.object({
     fingerprint_algorithm: z.literal("sha256").default("sha256"),
     fingerprints_complete: z.boolean().default(false),
     values_redacted: z.literal(true),
+  }),
+  css_variables: browserCssVariablesSchema.default({
+    status: "not_approved",
+    origin_scope: "same_origin",
+    total: 0,
+    retained_count: 0,
+    items: [],
   }),
   limitations: z.array(z.string()),
 });

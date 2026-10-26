@@ -205,7 +205,7 @@ export const listBrowserTargetsInputSchema = z.strictObject({
   ...browserInput,
 });
 
-const inspectWebPageInputFacts = {
+const baseBrowserInspectionFacts = {
   ...browserInput,
   target_id: z.string().trim().min(1),
   command_timeout_ms: webRuntimeCommandTimeoutSchema,
@@ -217,6 +217,19 @@ const inspectWebPageInputFacts = {
   include_storage_keys: z.boolean().default(false),
   include_storage_fingerprints: z.boolean().default(false),
 } as const;
+
+export const inspectWebPageInputFacts = {
+  ...baseBrowserInspectionFacts,
+  include_css_variables: z
+    .boolean()
+    .default(false)
+    .describe("Include root CSS custom properties and variables"),
+} as const;
+
+export const analyzeWebBundleBaseShapeSchema = z.strictObject({
+  ...baseBrowserInspectionFacts,
+  include_script_sources: z.literal(true).default(true),
+});
 
 const inspectWebPageWithoutSourceSchema = z.strictObject({
   ...inspectWebPageInputFacts,
@@ -232,8 +245,11 @@ type InspectWebPageShape =
   | z.output<typeof inspectWebPageWithoutSourceSchema>
   | z.output<typeof inspectWebPageWithSourceShapeSchema>;
 
-const refineInspectWebPageInput = (
-  input: InspectWebPageShape,
+export const refineBrowserStorageInput = (
+  input: {
+    readonly include_storage_fingerprints?: boolean;
+    readonly include_storage_keys?: boolean;
+  },
   context: z.RefinementCtx,
 ): void => {
   if (input.include_storage_fingerprints && !input.include_storage_keys)
@@ -242,6 +258,13 @@ const refineInspectWebPageInput = (
       path: ["include_storage_fingerprints"],
       message: "Storage fingerprints require storage key capture",
     });
+};
+
+const refineInspectWebPageInput = (
+  input: InspectWebPageShape,
+  context: z.RefinementCtx,
+): void => {
+  refineBrowserStorageInput(input, context);
 };
 
 /** Caller schema for source-capturing inspection and bundle analysis. */

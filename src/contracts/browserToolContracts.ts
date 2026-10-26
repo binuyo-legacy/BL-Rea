@@ -179,7 +179,7 @@ export const BROWSER_TOOL_CONTRACTS = [
     name: "inspect_web_page",
     ...toolContractMetadata("inspect_web_page"),
     description:
-      "Passively inspect one selected page target through CDP without evaluating JavaScript, navigating, clicking, closing, or mutating the page. If no origin filter is supplied, capture is scoped to the target's current origin. Returns DOM structure, accessibility, scripts, resources, attach-window network and console metadata, workers, and redacted storage inventory as Evidence.",
+      "Passively inspect one selected page target through CDP without evaluating JavaScript, navigating, clicking, closing, or mutating the page. If no origin filter is supplied, capture is scoped to the target's current origin. Returns DOM structure, accessibility, scripts, resources, attach-window network and console metadata, workers, redacted storage inventory, and optionally root CSS variables as Evidence.",
     kind: "browser-provider",
     inputSchema: inspectWebPageInputSchema,
     outputSchema: inspectionOutputSchema,
@@ -189,6 +189,14 @@ export const BROWSER_TOOL_CONTRACTS = [
         input: {
           cdp_endpoint: endpoint,
           target_id: "TARGET_ID_FROM_LIST_BROWSER_TARGETS",
+        },
+      },
+      {
+        title: "Inspect page styles and design tokens",
+        input: {
+          cdp_endpoint: endpoint,
+          target_id: "TARGET_ID_FROM_LIST_BROWSER_TARGETS",
+          include_css_variables: true,
         },
       },
     ],

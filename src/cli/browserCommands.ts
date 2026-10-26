@@ -122,6 +122,7 @@ const registerPageInspection = (
             include_script_sources: options.includeScriptSources,
             include_storage_keys: options.includeStorageKeys,
             include_storage_fingerprints: options.includeStorageFingerprints,
+            include_css_variables: options.includeCssVariables,
             ...selectedCommandTimeout(options.commandTimeoutMs),
           };
           const parsed = inspectWebPageInputSchema.safeParse(input);

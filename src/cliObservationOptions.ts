@@ -61,6 +61,10 @@ export const browserPageInspectionOptions = z.object({
     .boolean()
     .default(false)
     .describe("Include content-derived storage fingerprints"),
+  includeCssVariables: z
+    .boolean()
+    .default(false)
+    .describe("Include root CSS custom properties and variables"),
 });
 
 export const electronPageInspectionOptions = z.object({

@@ -213,14 +213,7 @@ const compareWebCaptureDimensions = (
       "Resource inventory or content-size evidence was incomplete in at least one observation.",
     ),
     network: networkDimension(before, after),
-    metadata: compareAggregate(
-      "metadata",
-      metadataProjection(before),
-      metadataProjection(after),
-      sectionsComplete(before, ["metadata"]) &&
-        sectionsComplete(after, ["metadata"]),
-      "Safe metadata capture was incomplete in at least one observation.",
-    ),
+    metadata: metadataDimension(before, after),
     webmcp: webMcpDimension(input.before.webmcp, input.after.webmcp),
     accessibility: accessibilityDimension(before, after),
     storage: storageDimension(before, after),
@@ -1102,6 +1095,126 @@ const metadataProjection = (inspection: WebPageInspection) => ({
   excluded_dom_urls: inspection.metadata.excluded_dom_urls,
   headers_allowlisted: inspection.metadata.headers_allowlisted,
 });
+
+const metadataDimension = (
+  before: WebPageInspection,
+  after: WebPageInspection,
+): Dimension => {
+  const metadataComplete =
+    sectionsComplete(before, ["metadata"]) &&
+    sectionsComplete(after, ["metadata"]);
+  const beforeMetadataDigest = digestCanonicalValue(metadataProjection(before));
+  const afterMetadataDigest = digestCanonicalValue(metadataProjection(after));
+  const changes: Change[] = [];
+  if (metadataComplete && beforeMetadataDigest !== afterMetadataDigest) {
+    changes.push({ identity: "metadata", change: "modified" });
+  }
+
+  const beforeCssSelected = before.css_variables.status !== "not_approved";
+  const afterCssSelected = after.css_variables.status !== "not_approved";
+
+  if (beforeCssSelected !== afterCssSelected) {
+    if (changes.length > 0) {
+      return {
+        status: "changed",
+        total_changes: changes.length,
+        changes,
+        reason: null,
+      };
+    }
+    return {
+      status: "unknown",
+      total_changes: 0,
+      changes: [],
+      reason: "CSS variables were selected in only one observation.",
+    };
+  }
+
+  let cssComplete = true;
+  if (beforeCssSelected && afterCssSelected) {
+    const inventoryComplete =
+      before.css_variables.status === "included" &&
+      after.css_variables.status === "included" &&
+      sectionsComplete(before, ["css_variables"]) &&
+      sectionsComplete(after, ["css_variables"]);
+
+    const beforeCssMap = new Map(
+      before.css_variables.items.map((item) => [
+        item.name,
+        digestCanonicalValue({ value: item.value, redacted: item.redacted }),
+      ]),
+    );
+    const afterCssMap = new Map(
+      after.css_variables.items.map((item) => [
+        item.name,
+        digestCanonicalValue({ value: item.value, redacted: item.redacted }),
+      ]),
+    );
+
+    let cssModified = false;
+    for (const [name, beforeDigest] of beforeCssMap) {
+      const afterDigest = afterCssMap.get(name);
+      if (afterDigest !== undefined && afterDigest !== beforeDigest) {
+        cssModified = true;
+        break;
+      }
+    }
+
+    let cssTokensAddedOrRemoved = false;
+    if (inventoryComplete) {
+      if (beforeCssMap.size !== afterCssMap.size) {
+        cssTokensAddedOrRemoved = true;
+      } else {
+        for (const name of afterCssMap.keys()) {
+          if (!beforeCssMap.has(name)) {
+            cssTokensAddedOrRemoved = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (cssModified || cssTokensAddedOrRemoved) {
+      changes.push({ identity: "css_variables", change: "modified" });
+    }
+
+    const hasRedactedTokens =
+      before.css_variables.items.some((item) => item.redacted) ||
+      after.css_variables.items.some((item) => item.redacted);
+
+    cssComplete = inventoryComplete && !hasRedactedTokens;
+  }
+
+  if (changes.length > 0) {
+    return {
+      status: "changed",
+      total_changes: changes.length,
+      changes: changes.sort((left, right) =>
+        compareUnicodeCodePoints(left.identity, right.identity),
+      ),
+      reason: null,
+    };
+  }
+
+  if (metadataComplete && cssComplete) {
+    return {
+      status: "unchanged",
+      total_changes: 0,
+      changes: [],
+      reason: null,
+    };
+  }
+
+  const reason = !metadataComplete
+    ? "Safe metadata capture was incomplete in at least one observation."
+    : "CSS variables capture was incomplete in at least one observation.";
+  return {
+    status: "unknown",
+    total_changes: 0,
+    changes: [],
+    reason,
+  };
+};
 
 const singleton = (key: string, value: string): ReadonlyMap<string, string> =>
   new Map([[key, value]]);

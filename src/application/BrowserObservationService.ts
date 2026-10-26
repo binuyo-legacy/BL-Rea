@@ -335,7 +335,12 @@ const retainBrowserObservation = (
     if (inspection.success) {
       const pageInput: InspectWebPageInput =
         "fetch_source_maps" in input
-          ? (({ fetch_source_maps: _fetchSourceMaps, ...page }) => page)(input)
+          ? {
+              ...(({ fetch_source_maps: _fetchSourceMaps, ...page }) => page)(
+                input,
+              ),
+              include_css_variables: false,
+            }
           : input;
       error.partialObservation = createBrowserEvidence(
         "inspect_web_page",
