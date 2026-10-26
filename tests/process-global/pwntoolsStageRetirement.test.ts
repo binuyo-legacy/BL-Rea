@@ -11,6 +11,7 @@ import {
   vi,
 } from "vitest";
 import { z } from "zod";
+import { ProviderCleanupError } from "../../src/domain/providerCleanupError.js";
 import { projectAnalysisError } from "../../src/domain/analysisErrorProjection.js";
 import { PwntoolsRecordedCrashProvider } from "../../src/native/pwntools/PwntoolsRecordedCrashProvider.js";
 import type { PwntoolsLauncher } from "../../src/native/pwntools/PwntoolsDecoder.js";
@@ -454,7 +455,22 @@ it.runIf(supportedHost).each(["decoder", "debugger"])(
       { signal: controller.signal },
     );
     if (result.ok) throw new Error("Expected the physical reply-close failure");
-    expect(result.error._tag).toBe("AnalysisOutputError");
+    if (stage === "debugger") {
+      expect(result.error).toBeInstanceOf(ProviderCleanupError);
+      expect(result.error.partialObservation).toMatchObject({
+        artifact: { path },
+        debugger: {
+          ...recordedCrashDebuggerFixture(),
+          diagnostics: {
+            stdout: "debugger diagnostic",
+            stderr: "",
+            truncated: false,
+          },
+        },
+        decoder_diagnostics: { stdout: "basic diagnostic" },
+      });
+      expect(result.error.cleanupResources).toContain(reply);
+    } else expect(result.error._tag).toBe("AnalysisOutputError");
     expect(result.error.cause).toBeInstanceOf(ArtifactFileCleanupFailure);
     if (!(result.error.cause instanceof ArtifactFileCleanupFailure))
       throw new Error("Expected exact file owner");

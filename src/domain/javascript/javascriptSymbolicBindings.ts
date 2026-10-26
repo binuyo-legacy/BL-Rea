@@ -1,11 +1,13 @@
 import * as t from "@babel/types";
 import {
+  staticObjectProperty,
   semanticStaticPropertyKey,
   semanticWriteSiteTarget,
   semanticWriteTargets,
   runtimeFunctionParameters,
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
+import { createSemanticExpressionShapeResolver } from "./javascriptSemanticExpressionShapes.js";
 import { javascriptBootstrapAt } from "./javascriptBootstrap.js";
 import { ELECTRON_MODULE } from "./javascriptElectronMemberWrites.js";
 import {
@@ -131,6 +133,7 @@ export class JavaScriptSymbolicBindings {
     ),
   ) {
     this.#electronIdentity = electronIdentity;
+    const shapes = createSemanticExpressionShapeResolver(state);
     this.#indexBindingAliases();
     traverseJavaScriptAst(program, {
       enter: (node) => {
@@ -157,13 +160,17 @@ export class JavaScriptSymbolicBindings {
             t.isStringLiteral(key) &&
             t.isObjectExpression(descriptor)
           ) {
-            const value = descriptor.properties.find(
-              (p) =>
-                t.isObjectProperty(p) &&
-                semanticStaticPropertyKey(p.key, p.computed) === "value",
+            const value = staticObjectProperty(
+              descriptor,
+              "value",
+              shapes.isNullish,
             );
-            if (t.isObjectProperty(value))
-              this.#addWrite(target, [key.value], value.value, node);
+            if (value.status === "explicit")
+              this.#addWrite(target, [key.value], value.property.value, node);
+            else if (value.status === "dynamic")
+              // Keep the unresolved call as a write so an earlier export cannot
+              // survive a descriptor whose effective value is unknown.
+              this.#addWrite(target, [key.value], node, node);
           }
         }
       },

@@ -1,6 +1,7 @@
 import { expect } from "vitest";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { runInNewContext } from "node:vm";
 import { z } from "zod";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { connectLocalToolsMcp } from "../../fixtures/localToolsMcp.js";
@@ -867,5 +868,132 @@ cliTest(
         expect.objectContaining({ expression: "allowed(event)" }),
       ]);
     }
+  },
+);
+
+const descriptorSender = `function(channel) { return (...args) => send(channel, ...args); }`;
+const descriptorNoop = `function() { return () => {}; }`;
+const descriptorCases = [
+  ["control", `{value:${descriptorSender}}`, true],
+  [
+    "duplicate-noop",
+    `{value:${descriptorSender},value:${descriptorNoop}}`,
+    false,
+  ],
+  [
+    "duplicate-sender",
+    `{value:${descriptorNoop},value:${descriptorSender}}`,
+    true,
+  ],
+  [
+    "spread-sender",
+    `{value:${descriptorNoop},...{value:${descriptorSender}}}`,
+    true,
+  ],
+  [
+    "spread-noop",
+    `{value:${descriptorSender},...{value:${descriptorNoop}}}`,
+    false,
+  ],
+  [
+    "computed-sender",
+    `{value:${descriptorNoop},["value"]:${descriptorSender}}`,
+    true,
+  ],
+  ["null-spread", `{value:${descriptorSender},...null}`, true],
+  ["undefined-spread", `{value:${descriptorSender},...undefined}`, true],
+  ["void-spread", `{value:${descriptorSender},...void 0}`, true],
+  ["nested-null-spread", `{value:${descriptorSender},...{...null}}`, true],
+] as const;
+
+cliTest.for(["CLI", "stdio MCP"] as const)(
+  "uses effective defineProperty descriptor values for bundled IPC paths through %s",
+  async (surface, { cli }) => {
+    const workspace = await createTestTempDirectory("rea-descriptor-values-");
+    const root = join(workspace, "路径-'values");
+    const files = Object.fromEntries(
+      descriptorCases.map(([name, descriptor, sends]) => {
+        const source = `(() => {
+        const modules = {
+          2(module) { module.exports = require("electron"); },
+          5(module, exports, load) {
+            const electron = load(2);
+            Object.defineProperty(exports, "sender", ${descriptor});
+            function send(channel, ...args) { electron.ipcRenderer.send(channel, ...args); }
+          },
+          9(module, exports, load) {
+            const helper = load(5);
+            load(2).contextBridge.exposeInMainWorld("${name}", {copy: helper.sender("${name}:copy")});
+          }
+        };
+        function load(id) { const m = {exports:{}}; modules[id].call(m.exports,m,m.exports,load); return m.exports; }
+        load(9);
+      })();`;
+        // Node executes only this test-owned fixture with a recording Electron
+        // substitute: an independent descriptor-semantics oracle, not provider proof.
+        const channels: string[] = [];
+        runInNewContext(
+          source,
+          {
+            require: () => ({
+              ipcRenderer: {
+                send: (channel: string) => channels.push(channel),
+              },
+              contextBridge: {
+                exposeInMainWorld: (_key: string, api: { copy(): void }) =>
+                  api.copy(),
+              },
+            }),
+          },
+          { timeout: 1_000 },
+        );
+        expect(channels, name).toEqual(sends ? [`${name}:copy`] : []);
+        return [`${name}.cjs`, source];
+      }),
+    );
+    await writeFixtureFiles(root, files);
+    const connection =
+      surface === "stdio MCP" ? await connectLocalToolsMcp() : undefined;
+    if (connection !== undefined) {
+      const failure = await connection.call("analyze_javascript_application", {
+        input_path: join(root, "absent"),
+        format: "directory",
+      });
+      expect(failure.isError).toBe(true);
+      await connection.client.ping();
+    }
+    const application = await analyzeJavaScriptDirectory(surface, cli, root, {
+      mcpCall: connection?.call,
+    });
+    await connection?.client.ping();
+    for (const [name, source] of Object.entries(files))
+      expect(await readFile(join(root, name), "utf8")).toBe(source);
+    expect(application.statistics).toMatchObject({
+      parsed_javascript_files: descriptorCases.length,
+      parse_failures: 0,
+    });
+    const terminals = application.graph.nodes
+      .flatMap((node) => node.observations)
+      .filter(
+        ({ properties }) =>
+          properties.step_kind === "terminal" &&
+          properties.terminal === "electron.ipcRenderer.send",
+      );
+    expect(
+      terminals.map(({ properties }) => properties.channel).sort(),
+    ).toEqual(
+      descriptorCases
+        .filter(([, , sends]) => sends)
+        .map(([name]) => `${name}:copy`)
+        .sort(),
+    );
+    for (const terminal of terminals)
+      expect(terminal).toMatchObject({
+        properties: { resolution: "candidate" },
+        evidence: {
+          state: "inferred",
+          authority: "static-relationship-inference",
+        },
+      });
   },
 );

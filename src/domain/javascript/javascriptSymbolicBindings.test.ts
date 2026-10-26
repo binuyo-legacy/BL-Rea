@@ -757,3 +757,43 @@ it.each([
     expect(resolver.unresolved).toBe(true);
   },
 );
+
+it.each([
+  ["unknown spread", `{value:require("electron"),...input}`, "unknown"],
+  ["unknown key", `{value:require("electron"),[key]:replacement}`, "unknown"],
+  [
+    "getter",
+    `{value:require("electron"),get value(){return replacement}}`,
+    "unknown",
+  ],
+  ["explicit after spread", `{...input,value:require("electron")}`, "external"],
+  ["null spread", `{value:require("electron"),...null}`, "external"],
+  ["undefined spread", `{value:require("electron"),...undefined}`, "external"],
+  ["void spread", `{value:require("electron"),...void 0}`, "external"],
+  [
+    "shadowed undefined",
+    `{value:require("electron"),...undefined}`,
+    "unknown",
+    "const undefined=input;",
+  ],
+  ["unchanged value", `{enumerable:true}`, "external"],
+])(
+  "preserves effective descriptor value uncertainty for %s",
+  (_name, descriptor, kind, setup = "") => {
+    const value = inspectOne(`(() => {
+      const modules = {
+        1(module,exports) {
+          ${setup}
+          exports.api = require("electron");
+          Object.defineProperty(exports,"api",${descriptor});
+        },
+        2(module,exports,load) { inspect(load(1).api); }
+      };
+      function load(id) {const m={exports:{}};modules[id](m,m.exports,load);return m.exports;}
+      load(2);
+    })();`);
+    expect(value.kind).toBe(kind);
+    if (kind === "external")
+      expect(value).toEqual({ kind: "external", path: ["electron"] });
+  },
+);

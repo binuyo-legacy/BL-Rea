@@ -71,9 +71,7 @@ describe("Trae configuration paths", () => {
       skillDestinations("C:\\Users\\a", ["trae"], {}, "win32").map(
         ({ path }) => path,
       ),
-    ).toEqual([
-      join("C:\\Users\\a", ".trae", "skills", "reverse-engineer-anything"),
-    ]);
+    ).toEqual(["C:\\Users\\a\\.trae\\skills\\reverse-engineer-anything"]);
   });
 });
 
