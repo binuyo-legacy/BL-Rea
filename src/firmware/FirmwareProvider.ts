@@ -36,6 +36,7 @@ import {
 } from "./FirmwareDeadline.js";
 import { admitFirmwareVersion } from "./FirmwareVersion.js";
 import {
+  firmwareFileSizeLimit,
   firmwareToolUnavailable,
   resolveFirmwareCommand,
   runFirmwareCommand,
@@ -498,6 +499,10 @@ export class FirmwareProvider implements FirmwareAnalysisPort {
           outputRoot,
           request.input.max_output_bytes,
           request.input.max_output_files,
+          firmwareFileSizeLimit(
+            command.fileSizeCeiling,
+            request.input.max_output_bytes,
+          ),
           request.operation,
           signal,
         );
