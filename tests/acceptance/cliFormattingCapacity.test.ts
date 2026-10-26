@@ -120,11 +120,18 @@ for (const scenario of scenarios)
         expect(result.stderr.trim()).toBe("REA_AUTHORED_FORMAT_CAPACITY");
         expect(result.stdout).toContain("resource_constraint");
         expect(result.stdout).toContain("--format json");
-        expect(result.stdout).toContain("formatted_characters");
+        // Markdown encodes underscores in headings, but not in table cells.
+        if (scenario.format === "md")
+          expect(result.stdout).toMatch(/formatted\\?_characters/u);
+        else expect(result.stdout).toContain("formatted_characters");
         expect(result.stdout).not.toContain("[truncated:");
         expect(result.stdout).not.toContain("UNKNOWN");
         if (outcome === "failure")
           expect(result.stdout).toContain("target_unavailable");
+        if (scenario.format === "md" && outcome === "failure")
+          expect(result.stdout).toContain(
+            `## ${scenario.full ? "error." : ""}details.reported\\_limits.formatted\\_characters\n\nnull`,
+          );
         if (scenario.format === "md" && scenario.full) {
           expect(result.stdout).toMatch(/^## ok\n\nfalse$/m);
           expect(result.stdout).toMatch(

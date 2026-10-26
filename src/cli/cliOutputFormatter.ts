@@ -66,6 +66,18 @@ const escapeTableCell = (value: string): string =>
     .replace(/[\\|`*[\]~]|_+/g, escapeInlineSyntax)
     .replace(/\r\n|\r|\n/g, "<br>");
 
+/** Source keys are heading text, never inline Markdown or record separators. */
+const formatHeading = (path: readonly string[]): string => {
+  const text = path
+    .join(".")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/([\\`*_[\]()!#~])/g, "\\$1")
+    .replace(/\r\n|\r|\n/g, "<br>");
+  return `## ${text}\n\n`;
+};
+
 const renderTable = (
   headers: readonly string[],
   rows: readonly string[][],
@@ -139,12 +151,12 @@ const formatMarkdown = (
   if (value == null && path.length === 0) return "";
   if (isScalar(value)) {
     if (path.length === 0) return String(value);
-    return `## ${path.join(".")}\n\n${String(value)}`;
+    return `${formatHeading(path)}${String(value)}`;
   }
   if (Array.isArray(value)) {
     if (isObjectArray(value)) {
       const table = formatObjectTable(value);
-      return path.length === 0 ? table : `## ${path.join(".")}\n\n${table}`;
+      return path.length === 0 ? table : `${formatHeading(path)}${table}`;
     }
     return formatMarkdown(markdownCell(value), path);
   }
@@ -163,7 +175,7 @@ const formatMarkdown = (
   return entries
     .map(([key, child]) => {
       const childPath = [...path, key];
-      const heading = `## ${childPath.join(".")}\n\n`;
+      const heading = formatHeading(childPath);
       if (isScalar(child)) return `${heading}${String(child)}`;
       if (isObjectArray(child)) return `${heading}${formatObjectTable(child)}`;
       if (
