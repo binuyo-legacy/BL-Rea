@@ -103,6 +103,27 @@ describe("HarmonyOS application projection", () => {
     expect(projection.runtime_families).toEqual([]);
   });
 
+  it("claims stage and FA models only from the exact manifest filenames", async () => {
+    // HAP/HSP/App Pack members are ZIP names. OpenHarmony's stage, FA, and
+    // app-pack manifests are module.json, config.json, and pack.info.
+    const path = await writeApplicationZip(
+      "rea-harmony-manifest-case-",
+      "Fixture.hap",
+      [
+        { path: "MODULE.JSON", content: "{}" },
+        { path: "CONFIG.JSON", content: "{}" },
+        { path: "PACK.INFO", content: "{}" },
+      ],
+    );
+    const projection = requireDeterministicProjection(
+      projectHarmonyApplicationEvidence,
+      await inventoryApplicationPackage(path),
+      harmonyApplicationProjectionResultSchema,
+    );
+    expect(projection.packaging_model).toBe("unknown");
+    expect(projection.components.manifests).toEqual([]);
+  });
+
   it("projects deterministic Stage HAP components and explicit bridge hypotheses", async () => {
     const path = await writeApplicationZip(
       "rea-harmony-",

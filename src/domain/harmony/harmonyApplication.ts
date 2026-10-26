@@ -184,10 +184,12 @@ const harmonyRootFormat = (
 const packagingModel = (
   manifests: readonly { readonly path: string }[],
 ): HarmonyApplicationProjectionResult["packaging_model"] => {
+  // ZIP member names are case-sensitive. Stage and FA manifests are exactly
+  // module.json and config.json; a different case is a different member.
   const stage = manifests.some(({ path }) =>
-    /(?:^|\/)module\.json$/iu.test(path),
+    /(?:^|\/)module\.json$/u.test(path),
   );
-  const fa = manifests.some(({ path }) => /(?:^|\/)config\.json$/iu.test(path));
+  const fa = manifests.some(({ path }) => /(?:^|\/)config\.json$/u.test(path));
   if (stage) return "stage";
   if (fa) return "fa";
   return "unknown";
@@ -196,7 +198,7 @@ const packagingModel = (
 const classify = (all: readonly Component[]) => ({
   manifests: all.filter(
     ({ path }) =>
-      /(?:^|\/)(?:module\.json|config\.json|pack\.info)$/iu.test(path) &&
+      /(?:^|\/)(?:module\.json|config\.json|pack\.info)$/u.test(path) &&
       !isResourcePath(path),
   ),
   bytecode: all.filter(({ path }) => /\.(?:abc|pa)$/iu.test(path)),
