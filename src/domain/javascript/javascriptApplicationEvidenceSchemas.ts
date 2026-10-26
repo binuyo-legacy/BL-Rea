@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { javascriptSourceRangeSchema } from "./javascriptSourceCoordinates.js";
-import { digestSchema } from "../digests.js";
-import { prefixedDigestSchema } from "../digests.js";
+import { digestSchema, prefixedDigestSchema } from "../digests.js";
 
 const boundedTextSchema = z.string().min(1);
 const boundedKeySchema = z.string().min(1);

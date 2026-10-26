@@ -9,9 +9,9 @@ import {
 import type {
   AnalysisExecution,
   AnalysisOperationPort,
+  AnalysisOperation,
 } from "../../../src/application/AnalysisProvider.js";
 import { createAnalysisExecution } from "../../../src/application/AnalysisProvider.js";
-import type { AnalysisOperation } from "../../../src/application/AnalysisProvider.js";
 import type { AnalysisError } from "../../../src/domain/analysisErrorBase.js";
 import {
   AnalysisCapabilityUnavailableError,

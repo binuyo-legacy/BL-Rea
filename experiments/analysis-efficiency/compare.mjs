@@ -1,7 +1,6 @@
-import { isDeepStrictEqual } from "node:util";
+import { isDeepStrictEqual, parseArgs } from "node:util";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { parseArgs } from "node:util";
 import { PACKET_ARTIFACTS } from "./packet-entry.mjs";
 import { SIGNAL_ARTIFACTS } from "./signal-entry.mjs";
 

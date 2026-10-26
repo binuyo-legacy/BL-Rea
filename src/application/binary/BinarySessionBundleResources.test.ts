@@ -17,11 +17,10 @@ import { bundleResourceRootSchema } from "../../domain/apple/bundleResourceRoot.
 import { AnalysisSnapshotMismatchError } from "../../domain/evidenceErrors.js";
 import type { AnalysisSnapshot } from "../../domain/analysisSnapshot.js";
 import { ProviderAdapterError } from "../../domain/providerAdapterError.js";
-import { err } from "../../domain/result.js";
+import { err, ok } from "../../domain/result.js";
 import { AnalysisCancelledError } from "../../domain/analysisErrorCore.js";
 import { createEvidence } from "../../domain/evidence.js";
 import { createAnalysisProfile } from "../../domain/analysisProfile.js";
-import { ok } from "../../domain/result.js";
 import { createTestProviderRouter } from "../../../tests/fixtures/binarySession.js";
 
 const identity: ProviderIdentity = {

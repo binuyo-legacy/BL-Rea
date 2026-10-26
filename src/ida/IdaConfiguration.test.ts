@@ -1,7 +1,6 @@
 import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdaTarget } from "../../tests/fixtures/idaMcp.js";
 import { readIdaConfiguration } from "./IdaConfiguration.js";
 import { decodeIdaToolResult } from "./IdaMcpConnection.js";

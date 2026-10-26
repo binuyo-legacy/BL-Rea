@@ -5,7 +5,16 @@ import {
   captureProcessScenario,
   retainRootSignaller,
 } from "./ProcessHarness.js";
-import { settleProcessCaptureJournal } from "./ProcessCaptureLifecycle.js";
+import {
+  settleProcessCaptureJournal,
+  releaseProcessResources,
+  ProcessCaptureResourceScope,
+  createProcessCaptureObservationBuffer,
+  prepareProcessCapture,
+  resolveProcessResult,
+  type ProcessCaptureCleanupOutcome,
+  type ProcessCaptureCleanupHost,
+} from "./ProcessCaptureLifecycle.js";
 import { parseProcessCapture } from "../../domain/process/processCaptureParsing.js";
 import { EMPTY_PROCESS_CAPTURE_EXAMPLE } from "../../domain/process/processCaptureExample.js";
 import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
@@ -19,15 +28,6 @@ import {
   normalizeCaptureFailure,
   processCaptureCancelled,
 } from "./ProcessCaptureError.js";
-import {
-  releaseProcessResources,
-  ProcessCaptureResourceScope,
-  createProcessCaptureObservationBuffer,
-  prepareProcessCapture,
-  resolveProcessResult,
-  type ProcessCaptureCleanupOutcome,
-  type ProcessCaptureCleanupHost,
-} from "./ProcessCaptureLifecycle.js";
 import { DarwinProcessOwnershipInspectionError } from "../DarwinProcessRunTokenReader.js";
 
 import {

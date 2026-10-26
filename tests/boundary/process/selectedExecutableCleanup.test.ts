@@ -47,9 +47,11 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-import { ProcessCaptureResourceScope } from "../../../src/process/capture/ProcessCaptureLifecycle.js";
+import {
+  ProcessCaptureResourceScope,
+  observeSelectedExecutable,
+} from "../../../src/process/capture/ProcessCaptureLifecycle.js";
 import { ProcessCaptureReadFailure } from "../../../src/process/capture/ProcessCaptureRead.js";
-import { observeSelectedExecutable } from "../../../src/process/capture/ProcessCaptureLifecycle.js";
 
 const roots: string[] = [];
 const createExecutable = async (content: string): Promise<string> => {
